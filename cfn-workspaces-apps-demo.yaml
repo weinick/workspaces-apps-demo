@@ -1,0 +1,399 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Amazon WorkSpaces Applications (AppStream 2.0) Demo Environment
+  包含: VPC、Image Builder (G4DN)、Fleet、Stack、用户关联
+  软件: Mendix Studio Pro + RapidMiner Studio (Altair AI Studio)
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: siemens-demo
+    Description: 环境名称前缀
+
+  Region:
+    Type: String
+    Default: ap-southeast-1
+    Description: 部署区域 (ap-southeast-1 新加坡 / ap-northeast-1 东京)
+
+  InstallerBucketName:
+    Type: String
+    Description: 存放软件安装包的 S3 Bucket 名称
+    Default: siemens-demo-installers
+
+  MendixInstallerKey:
+    Type: String
+    Description: Mendix Studio Pro 安装包在 S3 中的 Key
+    Default: installers/MendixStudioPro-10.24.0.exe
+
+  RapidMinerInstallerKey:
+    Type: String
+    Description: RapidMiner/Altair AI Studio 安装包在 S3 中的 Key
+    Default: installers/altair-aistudio-win64-install.exe
+
+  BaseImageName:
+    Type: String
+    Default: AppStream-Graphics-G4dn-WinServer2022-11-10-2025
+    Description: AppStream G4DN Base Image
+
+  FleetInstanceType:
+    Type: String
+    Default: stream.graphics.g4dn.xlarge
+    AllowedValues:
+      - stream.graphics.g4dn.xlarge
+      - stream.graphics.g4dn.2xlarge
+      - stream.graphics.g4dn.4xlarge
+    Description: Fleet 实例类型
+
+  FleetMaxCapacity:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+    Description: Fleet 最大实例数
+
+  FleetMinCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: Fleet 最小实例数 (Always-On)
+
+  VpcCidr:
+    Type: String
+    Default: 10.100.0.0/16
+    Description: VPC CIDR
+
+  PublicSubnet1Cidr:
+    Type: String
+    Default: 10.100.1.0/24
+
+  PublicSubnet2Cidr:
+    Type: String
+    Default: 10.100.2.0/24
+
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: 10.100.10.0/24
+
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: 10.100.11.0/24
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 基础配置
+        Parameters: [EnvironmentName, Region]
+      - Label:
+          default: 软件安装包 (需提前上传到 S3)
+        Parameters: [InstallerBucketName, MendixInstallerKey, RapidMinerInstallerKey]
+      - Label:
+          default: AppStream 配置
+        Parameters: [BaseImageName, FleetInstanceType, FleetMaxCapacity, FleetMinCapacity]
+      - Label:
+          default: 网络配置
+        Parameters: [VpcCidr, PublicSubnet1Cidr, PublicSubnet2Cidr, PrivateSubnet1Cidr, PrivateSubnet2Cidr]
+
+Resources:
+
+  # ============================================================
+  # VPC & 网络
+  # ============================================================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet1Cidr
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-public-subnet-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet2Cidr
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-public-subnet-2
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet1Cidr
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-subnet-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-subnet-2
+
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-nat-eip
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-nat
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-public-rt
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-rt
+
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet2
+
+  # ============================================================
+  # Security Groups
+  # ============================================================
+  ImageBuilderSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-imagebuilder-sg
+      GroupDescription: Security group for AppStream Image Builder
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound (for software download)
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-imagebuilder-sg
+
+  FleetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-fleet-sg
+      GroupDescription: Security group for AppStream Fleet
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-fleet-sg
+
+  # ============================================================
+  # S3 Bucket (存放安装包，Image Builder 用)
+  # ============================================================
+  InstallerBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${InstallerBucketName}-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-installers
+
+  # ============================================================
+  # IAM Role for Image Builder (访问 S3 安装包)
+  # ============================================================
+  ImageBuilderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-imagebuilder-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appstream.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonAppStreamServiceAccess
+      Policies:
+        - PolicyName: S3InstallerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt InstallerBucket.Arn
+                  - !Sub ${InstallerBucket.Arn}/*
+
+  # ============================================================
+  # AppStream Image Builder (G4DN)
+  # 注意: Image Builder 由 CFN 创建但软件安装需手动完成
+  # 创建后通过 create-streaming-url 登录安装，然后用 Image Assistant 打包
+  # ============================================================
+  AppStreamImageBuilder:
+    Type: AWS::AppStream::ImageBuilder
+    DependsOn:
+      - PrivateSubnet1RouteTableAssociation
+      - NatGateway
+    Properties:
+      Name: !Sub ${EnvironmentName}-g4dn-builder
+      DisplayName: !Sub ${EnvironmentName} G4DN Image Builder
+      Description: Install Mendix Studio Pro and RapidMiner (Altair AI Studio)
+      ImageName: !Ref BaseImageName
+      InstanceType: !Ref FleetInstanceType
+      VpcConfig:
+        SubnetIds:
+          - !Ref PrivateSubnet1
+        SecurityGroupIds:
+          - !Ref ImageBuilderSecurityGroup
+      IamRoleArn: !GetAtt ImageBuilderRole.Arn
+      EnableDefaultInternetAccess: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-imagebuilder
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ============================================================
+  # AppStream Fleet (G4DN)
+  # 注意: Fleet 的 ImageName 需要在镜像制作完成后手动更新
+  # 或通过自定义镜像名称参数传入
+  # ============================================================
+  # Fleet 和 Stack 需要在自定义镜像制作完成后通过 CLI 创建
+  # 见部署说明 Step 4
+
+  # ============================================================
+  # Outputs
+  # ============================================================
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${EnvironmentName}-VpcId
+
+  PrivateSubnet1Id:
+    Description: Private Subnet 1 ID (Image Builder / Fleet 使用)
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub ${EnvironmentName}-PrivateSubnet1Id
+
+  PrivateSubnet2Id:
+    Description: Private Subnet 2 ID
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub ${EnvironmentName}-PrivateSubnet2Id
+
+  ImageBuilderSecurityGroupId:
+    Description: Image Builder Security Group ID
+    Value: !Ref ImageBuilderSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-ImageBuilderSgId
+
+  FleetSecurityGroupId:
+    Description: Fleet Security Group ID
+    Value: !Ref FleetSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-FleetSgId
+
+  InstallerBucketName:
+    Description: S3 Bucket for software installers
+    Value: !Ref InstallerBucket
+    Export:
+      Name: !Sub ${EnvironmentName}-InstallerBucket
+
+  ImageBuilderName:
+    Description: AppStream Image Builder Name
+    Value: !Ref AppStreamImageBuilder
+    Export:
+      Name: !Sub ${EnvironmentName}-ImageBuilderName
