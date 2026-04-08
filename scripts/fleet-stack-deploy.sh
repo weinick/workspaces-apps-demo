@@ -48,8 +48,8 @@ aws appstream create-fleet \
   --description "Mendix Studio Pro + RapidMiner (Altair AI Studio)" \
   --stream-view APP \
   --max-user-duration-in-seconds 14400 \
-  --disconnect-timeout-in-seconds 1800 \
-  --idle-disconnect-timeout-in-seconds 1800
+  --disconnect-timeout-in-seconds 14400 \
+  --idle-disconnect-timeout-in-seconds 14400
 
 echo "Fleet 创建成功，等待 RUNNING 状态..."
 aws appstream wait fleet-running \
