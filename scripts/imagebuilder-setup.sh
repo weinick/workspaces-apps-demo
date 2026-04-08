@@ -1,54 +1,143 @@
 #!/bin/bash
 # imagebuilder-setup.sh
-# Image Builder 启动后，在 Windows 桌面安装软件前先运行此脚本
-# 作用: 生成 Image Builder 的 Streaming URL，供登录使用
+# 功能:
+#   1. 检查 S3 中的安装包并生成 Presigned URL（供 Image Builder 内下载使用）
+#   2. 等待 Image Builder RUNNING 后生成登录 URL
+
+set -euo pipefail
 
 REGION="${1:-ap-southeast-1}"
-BUILDER_NAME="${2:-siemens-demo-g4dn-builder}"
+STACK_NAME="${2:-siemens-demo}"
+PRESIGN_EXPIRES="${3:-3600}"  # Presigned URL 有效期（秒），默认1小时
 
+echo "=============================="
+echo "WorkSpaces Applications Demo"
+echo "Image Builder Setup Script"
+echo "=============================="
+echo ""
+
+# 从 CFN Outputs 获取 S3 Bucket 和 Image Builder 名称
+echo "=== 读取 CloudFormation 配置 ==="
+BUCKET=$(aws cloudformation describe-stacks \
+  --stack-name "$STACK_NAME" \
+  --region "$REGION" \
+  --query 'Stacks[0].Outputs[?OutputKey==`InstallerBucketName`].OutputValue' \
+  --output text)
+
+BUILDER_NAME=$(aws cloudformation describe-stacks \
+  --stack-name "$STACK_NAME" \
+  --region "$REGION" \
+  --query 'Stacks[0].Outputs[?OutputKey==`ImageBuilderName`].OutputValue' \
+  --output text)
+
+echo "S3 Bucket:     $BUCKET"
+echo "Image Builder: $BUILDER_NAME"
+echo ""
+
+# 列出 S3 中的安装包并生成 Presigned URL
+echo "=== 检查 S3 安装包 ==="
+INSTALLERS=$(aws s3 ls "s3://$BUCKET/installers/" --region "$REGION" 2>/dev/null || true)
+
+if [[ -z "$INSTALLERS" ]]; then
+  echo "❌ S3 中没有找到安装包！"
+  echo ""
+  echo "请先将软件安装包上传到 S3："
+  echo "  aws s3 cp <installer.exe> s3://$BUCKET/installers/ --region $REGION"
+  echo ""
+  exit 1
+fi
+
+echo "找到以下安装包："
+echo "$INSTALLERS"
+echo ""
+
+echo "=== 生成 Presigned URLs（有效期 ${PRESIGN_EXPIRES} 秒）==="
+echo ""
+
+PRESIGN_CMDS=""
+while IFS= read -r line; do
+  # 提取文件名
+  FILENAME=$(echo "$line" | awk '{print $4}')
+  if [[ -z "$FILENAME" ]]; then continue; fi
+
+  S3_KEY="installers/$FILENAME"
+  PRESIGNED_URL=$(aws s3 presign "s3://$BUCKET/$S3_KEY" \
+    --region "$REGION" \
+    --expires-in "$PRESIGN_EXPIRES")
+
+  echo "📦 $FILENAME"
+  echo "   Presigned URL:"
+  echo "   $PRESIGNED_URL"
+  echo ""
+
+  # 生成 PowerShell 下载命令
+  SAFE_NAME=$(echo "$FILENAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+  PRESIGN_CMDS="${PRESIGN_CMDS}
+# 下载 $FILENAME
+Invoke-WebRequest -Uri \"$PRESIGNED_URL\" -OutFile \"C:\Temp\\$SAFE_NAME\"
+"
+done <<< "$INSTALLERS"
+
+echo "=============================="
+echo "📋 Image Builder 内 PowerShell 下载命令（复制到 Image Builder 使用）："
+echo "=============================="
+echo ""
+echo "# Step 1: 创建临时目录"
+echo "New-Item -ItemType Directory -Force -Path C:\Temp"
+echo ""
+echo "$PRESIGN_CMDS"
+
+# 检查并等待 Image Builder RUNNING
+echo ""
 echo "=== 检查 Image Builder 状态 ==="
 STATE=$(aws appstream describe-image-builders \
   --names "$BUILDER_NAME" \
   --region "$REGION" \
   --query 'ImageBuilders[0].State' \
-  --output text)
+  --output text 2>/dev/null || echo "NOT_FOUND")
+
 echo "当前状态: $STATE"
 
+if [[ "$STATE" == "NOT_FOUND" || "$STATE" == "None" ]]; then
+  echo "❌ Image Builder 不存在，请先部署 CloudFormation Stack"
+  exit 1
+fi
+
 if [[ "$STATE" != "RUNNING" ]]; then
-  echo "Image Builder 未就绪，等待 RUNNING..."
+  echo "等待 Image Builder RUNNING..."
   aws appstream wait image-builder-running \
     --names "$BUILDER_NAME" \
     --region "$REGION"
-  echo "Image Builder RUNNING ✓"
+  echo "Image Builder RUNNING ✅"
 fi
 
 echo ""
-echo "=== 生成登录 URL ==="
-URL=$(aws appstream create-image-builder-streaming-url \
+echo "=== 生成 Image Builder 登录 URL（有效期 1 小时）==="
+LOGIN_URL=$(aws appstream create-image-builder-streaming-url \
   --name "$BUILDER_NAME" \
   --region "$REGION" \
   --validity 3600 \
-  --query 'StreamingUrl' \
+  --query 'StreamingURL' \
   --output text)
 
 echo ""
 echo "=============================="
-echo "✅ Image Builder 登录 URL (1小时有效):"
-echo "$URL"
+echo "✅ 准备完成！请按以下步骤操作："
 echo "=============================="
 echo ""
-echo "登录后安装步骤："
-echo "1. 打开 PowerShell (管理员)"
-echo "2. 从 S3 下载安装包:"
-echo "   aws s3 cp s3://<your-bucket>/installers/MendixStudioPro-10.24.0.exe C:\\Temp\\"
-echo "   aws s3 cp s3://<your-bucket>/installers/altair-aistudio-win64-install.exe C:\\Temp\\"
-echo "3. 静默安装 Mendix:"
-echo "   C:\\Temp\\MendixStudioPro-10.24.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
-echo "4. 安装 RapidMiner (Altair AI Studio):"
-echo "   C:\\Temp\\altair-aistudio-win64-install.exe -q"
-echo "5. 安装完成后，打开 Image Assistant (桌面快捷方式)"
-echo "6. 在 Image Assistant 中:"
-echo "   - 添加 Mendix Studio Pro 应用"
-echo "   - 添加 RapidMiner/Altair AI Studio 应用"
+echo "1️⃣  在浏览器打开以下 URL，登录 Image Builder Windows 桌面："
+echo ""
+echo "   $LOGIN_URL"
+echo ""
+echo "2️⃣  登录后打开 PowerShell（管理员），粘贴上方的下载命令，下载安装包"
+echo ""
+echo "3️⃣  安装完成后，打开桌面的 Image Assistant："
+echo "   - 点击 'Add App'，添加已安装的应用"
 echo "   - 点击 'Create Image'"
-echo "   - 镜像名称: siemens-demo-custom-image-v1"
+echo "   - 镜像名称填写: siemens-demo-custom-image-v1"
+echo "   - 点击确认，等待打包完成（约 20-30 分钟）"
+echo ""
+echo "4️⃣  镜像制作完成后，执行以下命令部署 Fleet 和 Stack："
+echo ""
+echo "   bash fleet-stack-deploy.sh $REGION $STACK_NAME siemens-demo-custom-image-v1 <user-email>"
+echo ""
