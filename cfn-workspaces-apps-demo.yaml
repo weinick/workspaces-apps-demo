@@ -301,7 +301,7 @@ Resources:
               Service: appstream.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonAppStreamServiceAccess
+        - arn:aws:iam::aws:policy/service-role/AmazonAppStreamServiceAccess
       Policies:
         - PolicyName: S3InstallerAccess
           PolicyDocument:
