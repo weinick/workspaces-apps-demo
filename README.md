@@ -113,14 +113,14 @@ bash imagebuilder-setup.sh ap-southeast-1 siemens-demo
 
 ```powershell
 # 示例（脚本会自动生成实际命令）
-New-Item -ItemType Directory -Force -Path C:\Temp
-Invoke-WebRequest -Uri "<presigned-url>" -OutFile "C:\Temp\installer.exe"
+# 安装包直接保存到 C:\ 根目录，无需创建子目录
+Invoke-WebRequest -Uri "<presigned-url>" -OutFile "C:\installer.exe"
 
 # 静默安装 Mendix Studio Pro
-C:\Temp\MendixStudioPro-10.24.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+C:\MendixStudioPro-10.24.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # 安装 Altair AI Studio
-C:\Temp\ai-studio-installer.exe -q
+C:\ai-studio-installer.exe -q
 ```
 
 ### 3.3 使用 Image Assistant 打包镜像
