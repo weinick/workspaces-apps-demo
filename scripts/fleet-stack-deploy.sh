@@ -9,13 +9,16 @@ REGION="${1:-ap-southeast-1}"
 ENV_NAME="${2:-siemens-demo}"
 CUSTOM_IMAGE_NAME="${3:-}"   # 必须提供
 STUDENT_COUNT="${4:-10}"     # 预期学员人数，用于 Auto Scaling 和批量生成 URL
-URL_VALIDITY="${5:-9000}"    # Streaming URL 有效期（秒），默认 2.5 小时
+URL_HOURS="${5:-2.5}"        # Streaming URL 有效期（小时，支持小数），默认 2.5 小时
 
 if [[ -z "$CUSTOM_IMAGE_NAME" ]]; then
-  echo "Usage: $0 <region> <env-name> <custom-image-name> [student-count] [url-validity-seconds]"
-  echo "Example: $0 ap-southeast-1 siemens-demo siemens-demo-custom-image-v1 20 9000"
+  echo "Usage: $0 <region> <env-name> <custom-image-name> [student-count] [url-validity-hours]"
+  echo "Example: $0 ap-southeast-1 siemens-demo siemens-demo-custom-image-v1 20 2.5"
   exit 1
 fi
+
+# 小时转换为秒
+URL_VALIDITY=$(python3 -c "print(int(float('${URL_HOURS}') * 3600))")
 
 FLEET_NAME="${ENV_NAME}-fleet"
 STACK_NAME="${ENV_NAME}-stack"
@@ -161,13 +164,13 @@ aws appstream associate-fleet \
 # 5. 批量生成 Streaming URL
 # ============================================================
 echo ""
-echo "=== [5/6] 批量生成 Streaming URL (${STUDENT_COUNT} 个，有效期 ${URL_VALIDITY} 秒) ==="
+echo "=== [5/6] 批量生成 Streaming URL (${STUDENT_COUNT} 个，有效期 ${URL_HOURS} 小时) ==="
 echo ""
 
 URL_FILE="${ENV_NAME}-streaming-urls-$(date +%Y%m%d-%H%M%S).txt"
 echo "# WorkSpaces Applications Demo - Streaming URLs" > "$URL_FILE"
 echo "# 生成时间: $(date)" >> "$URL_FILE"
-echo "# 有效期: ${URL_VALIDITY} 秒 ($(( URL_VALIDITY / 3600 ))h$(( (URL_VALIDITY % 3600) / 60 ))m)" >> "$URL_FILE"
+echo "# 有效期: ${URL_HOURS} 小时 (${URL_VALIDITY} 秒)" >> "$URL_FILE"
 echo "# 学员人数: ${STUDENT_COUNT}" >> "$URL_FILE"
 echo "" >> "$URL_FILE"
 
@@ -198,7 +201,7 @@ echo "=============================="
 echo "Fleet:        $FLEET_NAME (RUNNING, Min: $MIN_CAPACITY, Max: $MAX_CAPACITY)"
 echo "Stack:        $STACK_NAME"
 echo "学员人数:      $STUDENT_COUNT"
-echo "URL 有效期:    ${URL_VALIDITY}s ($(( URL_VALIDITY / 3600 ))h$(( (URL_VALIDITY % 3600) / 60 ))m)"
+echo "URL 有效期:    ${URL_HOURS}h (${URL_VALIDITY}s)"
 echo "URL 文件:      $URL_FILE"
 echo ""
 echo "使用说明:"
@@ -208,4 +211,4 @@ echo "  3. 同一链接同时只允许一个并发会话"
 echo "  4. 培训结束后执行 cleanup.sh 释放资源"
 echo ""
 echo "重新生成 URL（URL 过期后）:"
-echo "  bash $0 $REGION $ENV_NAME $CUSTOM_IMAGE_NAME $STUDENT_COUNT <新有效期秒数>"
+echo "  bash $0 $REGION $ENV_NAME $CUSTOM_IMAGE_NAME $STUDENT_COUNT <新有效期小时>"
