@@ -74,7 +74,7 @@ while IFS= read -r line; do
   SAFE_NAME=$(echo "$FILENAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
   PRESIGN_CMDS="${PRESIGN_CMDS}
 # 下载 $FILENAME
-Invoke-WebRequest -Uri \"$PRESIGNED_URL\" -OutFile \"C:\Temp\\$SAFE_NAME\"
+Invoke-WebRequest -Uri \"$PRESIGNED_URL\" -OutFile \"C:\\$SAFE_NAME\"
 "
 done <<< "$INSTALLERS"
 
@@ -82,9 +82,7 @@ echo "=============================="
 echo "📋 Image Builder 内 PowerShell 下载命令（复制到 Image Builder 使用）："
 echo "=============================="
 echo ""
-echo "# Step 1: 创建临时目录"
-echo "New-Item -ItemType Directory -Force -Path C:\Temp"
-echo ""
+echo "# 直接保存到 C:\ 根目录，无需创建子目录"
 echo "$PRESIGN_CMDS"
 
 # 检查并等待 Image Builder RUNNING
