@@ -78,29 +78,49 @@ aws cloudformation deploy \
 
 ## Step 3：登录 Image Builder 安装软件
 
-### 3.1 获取登录 URL
+### 3.1 上传软件安装包到 S3
+
+先将安装包上传到 CloudFormation 创建的 S3 Bucket：
 
 ```bash
-bash imagebuilder-setup.sh ap-southeast-1 siemens-demo-g4dn-builder
+# 获取 Bucket 名称
+BUCKET=$(aws cloudformation describe-stacks \
+  --stack-name siemens-demo \
+  --region ap-southeast-1 \
+  --query 'Stacks[0].Outputs[?OutputKey==`InstallerBucketName`].OutputValue' \
+  --output text)
+
+# 上传安装包（按需上传，支持一个或多个）
+aws s3 cp MendixStudioPro-10.24.0.exe s3://$BUCKET/installers/ --region ap-southeast-1
+aws s3 cp ai-studio-win64-install.exe s3://$BUCKET/installers/ --region ap-southeast-1
 ```
 
-将输出一个 Streaming URL，在浏览器中打开即可进入 Windows 桌面。
+### 3.2 生成 Presigned URL + Image Builder 登录 URL
 
-### 3.2 在 Windows 桌面安装软件
+```bash
+bash imagebuilder-setup.sh ap-southeast-1 siemens-demo
+```
 
-打开 PowerShell（管理员），执行：
+脚本会自动完成：
+- ✅ 检查 S3 中的安装包
+- ✅ 为每个安装包生成 **Presigned URL**（1小时有效，无需 AWS 凭证即可下载）
+- ✅ 生成 Image Builder **登录 URL**
+- ✅ 输出可直接粘贴到 Image Builder 内的 PowerShell 下载命令
+
+### 3.3 在 Windows 桌面安装软件
+
+用登录 URL 进入 Image Builder Windows 桌面后，打开 PowerShell（管理员），将脚本输出的下载命令粘贴执行（使用 Presigned URL 下载，无需配置 AWS 凭证）：
 
 ```powershell
-# 从 S3 下载安装包
-$BucketName = "<从CFN输出获取>"
-aws s3 cp s3://$BucketName/installers/MendixStudioPro-10.24.0.exe C:\Temp\
-aws s3 cp s3://$BucketName/installers/altair-aistudio-win64-install.exe C:\Temp\
+# 示例（脚本会自动生成实际命令）
+New-Item -ItemType Directory -Force -Path C:\Temp
+Invoke-WebRequest -Uri "<presigned-url>" -OutFile "C:\Temp\installer.exe"
 
 # 静默安装 Mendix Studio Pro
 C:\Temp\MendixStudioPro-10.24.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
-# 安装 Altair AI Studio (RapidMiner)
-C:\Temp\altair-aistudio-win64-install.exe -q
+# 安装 Altair AI Studio
+C:\Temp\ai-studio-installer.exe -q
 ```
 
 ### 3.3 使用 Image Assistant 打包镜像
