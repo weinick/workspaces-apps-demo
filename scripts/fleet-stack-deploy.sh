@@ -47,9 +47,9 @@ aws appstream create-fleet \
   --display-name "Siemens Demo Fleet (G4DN)" \
   --description "Mendix Studio Pro + RapidMiner (Altair AI Studio)" \
   --stream-view APP \
-  --max-user-duration-in-seconds 14400 \
-  --disconnect-timeout-in-seconds 14400 \
-  --idle-disconnect-timeout-in-seconds 14400
+  --max-user-duration-in-seconds 9000 \
+  --disconnect-timeout-in-seconds 9000 \
+  --idle-disconnect-timeout-in-seconds 9000
 
 echo "Fleet 创建成功，等待 RUNNING 状态..."
 aws appstream wait fleet-running \
