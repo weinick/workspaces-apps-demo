@@ -1,61 +1,56 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Amazon WorkSpaces Applications (AppStream 2.0) Demo Environment
-  包含: VPC、Image Builder、Fleet、Stack、用户关联
+  Amazon WorkSpaces Applications (AppStream 2.0) 通用部署模板
+  包含: VPC、NAT Gateway、Security Groups、S3、IAM Role、Image Builder
+  Fleet 和 Stack 在镜像制作完成后通过 fleet-stack-deploy.sh 创建
   支持实例类型: General Purpose / Compute / Memory / Graphics G4dn / G5 / G6
 
 Parameters:
   EnvironmentName:
     Type: String
-    Default: siemens-demo
-    Description: 环境名称前缀
+    Default: my-demo
+    Description: 环境名称前缀（用于所有资源命名，建议使用客户名或项目名）
 
   Region:
     Type: String
     Default: ap-southeast-1
-    Description: 部署区域 (ap-southeast-1 新加坡 / ap-northeast-1 东京)
+    Description: 部署区域 (ap-southeast-1 新加坡 / ap-northeast-1 东京 / us-east-1 弗吉尼亚)
 
   InstallerBucketName:
     Type: String
-    Description: 存放软件安装包的 S3 Bucket 名称
-    Default: siemens-demo-installers
-
-  MendixInstallerKey:
-    Type: String
-    Description: Mendix Studio Pro 安装包在 S3 中的 Key
-    Default: installers/MendixStudioPro-10.24.0.exe
-
-  RapidMinerInstallerKey:
-    Type: String
-    Description: RapidMiner/Altair AI Studio 安装包在 S3 中的 Key
-    Default: installers/altair-aistudio-win64-install.exe
+    Description: 存放软件安装包的 S3 Bucket 名称（会自动附加 Account ID 后缀避免冲突）
+    Default: my-demo-installers
 
   BaseImageName:
     Type: String
     Default: AppStream-Graphics-G4dn-WinServer2022-11-10-2025
     Description: >
-      AppStream Base Image 名称。必须与所选 FleetInstanceType 匹配：
+      AppStream Base Image 名称。必须与 Image Builder 实例类型匹配：
       - General Purpose / Compute / Memory: AppStream-WinServer-<OS>-<DATE>
-      - Graphics G4dn: AppStream-Graphics-G4dn-WinServer2022-<DATE>
-      - Graphics G5:   AppStream-Graphics-G5-WinServer2022-<DATE>
-      - Graphics G6:   AppStream-Graphics-G6-WinServer2022-<DATE>
+      - Graphics G4dn (NVIDIA T4):  AppStream-Graphics-G4dn-WinServer2022-<DATE>
+      - Graphics G5  (NVIDIA A10G): AppStream-Graphics-G5-WinServer2022-<DATE>
+      - Graphics G6  (NVIDIA L4):   AppStream-Graphics-G6-WinServer2022-<DATE>
+      可在控制台 AppStream > Images > Public Images 中查找最新版本
 
-  FleetInstanceType:
+  ImageBuilderInstanceType:
     Type: String
     Default: stream.graphics.g4dn.xlarge
     Description: >
-      Fleet 实例类型。请根据应用需求选择，并确保 BaseImageName 与所选系列匹配。
-      General Purpose (通用，适合浏览器/办公应用):
+      Image Builder 实例类型，用于安装软件和制作镜像。
+      选择与目标 Fleet 相同或更高规格的实例类型，确保镜像兼容。
+
+      ── General Purpose (通用，适合浏览器/办公应用) ──
         stream.standard.small / medium / large / xlarge / 2xlarge
-      Compute Optimized (计算密集型):
+      ── Compute Optimized (计算密集型) ──
         stream.compute.large / xlarge / 2xlarge / 4xlarge / 8xlarge
-      Memory Optimized (内存密集型，大数据集):
-        stream.memory.large / xlarge / 2xlarge / 4xlarge / 8xlarge / z1d.large / z1d.xlarge / z1d.2xlarge / z1d.3xlarge / z1d.6xlarge / z1d.12xlarge
-      Graphics G4dn (NVIDIA T4，GPU 图形/ML 推理):
+      ── Memory Optimized (内存密集型，适合大数据集) ──
+        stream.memory.large / xlarge / 2xlarge / 4xlarge / 8xlarge
+        stream.memory.z1d.large / xlarge / 2xlarge / 3xlarge / 6xlarge / 12xlarge
+      ── Graphics G4dn (NVIDIA T4，GPU 图形/ML 推理) ──
         stream.graphics.g4dn.xlarge / 2xlarge / 4xlarge / 8xlarge / 12xlarge / 16xlarge
-      Graphics G5 (NVIDIA A10G，高端图形/视频渲染):
+      ── Graphics G5 (NVIDIA A10G，高端图形/视频渲染) ──
         stream.graphics.g5.xlarge / 2xlarge / 4xlarge / 8xlarge / 12xlarge / 16xlarge / 24xlarge / 48xlarge
-      Graphics G6 (NVIDIA L4，新一代 GPU):
+      ── Graphics G6 (NVIDIA L4，新一代 GPU，性价比更高) ──
         stream.graphics.g6.xlarge / 2xlarge / 4xlarge / 8xlarge / 12xlarge / 16xlarge / 24xlarge / 48xlarge
     AllowedValues:
       # ── General Purpose ──────────────────────────────────────
@@ -108,19 +103,6 @@ Parameters:
       - stream.graphics.g6.24xlarge
       - stream.graphics.g6.48xlarge
 
-  FleetMaxCapacity:
-    Type: Number
-    Default: 2
-    MinValue: 1
-    MaxValue: 500
-    Description: Fleet 最大实例数（Auto Scaling 上限）
-
-  FleetMinCapacity:
-    Type: Number
-    Default: 1
-    MinValue: 0
-    Description: Fleet 最小实例数（0 表示不保留热备，节省费用）
-
   VpcCidr:
     Type: String
     Default: 10.100.0.0/16
@@ -150,20 +132,20 @@ Metadata:
         Parameters: [EnvironmentName, Region]
       - Label:
           default: 软件安装包 (需提前上传到 S3)
-        Parameters: [InstallerBucketName, MendixInstallerKey, RapidMinerInstallerKey]
+        Parameters: [InstallerBucketName]
       - Label:
-          default: AppStream 配置
-        Parameters: [BaseImageName, FleetInstanceType, FleetMinCapacity, FleetMaxCapacity]
+          default: AppStream Image Builder 配置
+        Parameters: [BaseImageName, ImageBuilderInstanceType]
       - Label:
           default: 网络配置
         Parameters: [VpcCidr, PublicSubnet1Cidr, PublicSubnet2Cidr, PrivateSubnet1Cidr, PrivateSubnet2Cidr]
     ParameterLabels:
-      FleetInstanceType:
-        default: "实例类型 (请确保与 BaseImageName 系列匹配)"
-      FleetMinCapacity:
-        default: "最小实例数 (0=无热备, 节省费用)"
-      FleetMaxCapacity:
-        default: "最大实例数 (Auto Scaling 上限)"
+      EnvironmentName:
+        default: "环境名称 (客户名/项目名，如 acme-demo)"
+      ImageBuilderInstanceType:
+        default: "Image Builder 实例类型 (与目标 Fleet 同系列)"
+      InstallerBucketName:
+        default: "S3 Bucket 名称 (自动添加 AccountId 后缀)"
 
 Resources:
 
@@ -388,8 +370,8 @@ Resources:
 
   # ============================================================
   # AppStream Image Builder
-  # 注意: Image Builder 由 CFN 创建但软件安装需手动完成
-  # 创建后通过 create-streaming-url 登录安装，然后用 Image Assistant 打包
+  # 注意: Image Builder 由 CFN 创建，软件安装需手动完成
+  # 步骤: 用 imagebuilder-setup.sh 生成登录 URL → 安装软件 → Image Assistant 打包
   # ============================================================
   AppStreamImageBuilder:
     Type: AWS::AppStream::ImageBuilder
@@ -399,9 +381,9 @@ Resources:
     Properties:
       Name: !Sub ${EnvironmentName}-builder
       DisplayName: !Sub ${EnvironmentName} Image Builder
-      Description: !Sub "Image Builder for ${EnvironmentName} (${FleetInstanceType})"
+      Description: !Sub "Image Builder for ${EnvironmentName} (${ImageBuilderInstanceType})"
       ImageName: !Ref BaseImageName
-      InstanceType: !Ref FleetInstanceType
+      InstanceType: !Ref ImageBuilderInstanceType
       VpcConfig:
         SubnetIds:
           - !Ref PrivateSubnet1
@@ -414,17 +396,13 @@ Resources:
           Value: !Sub ${EnvironmentName}-imagebuilder
         - Key: Environment
           Value: !Ref EnvironmentName
-        - Key: InstanceType
-          Value: !Ref FleetInstanceType
 
   # ============================================================
-  # Fleet 和 Stack 需要在自定义镜像制作完成后通过 CLI 创建
-  # 见部署说明 Step 4: bash scripts/fleet-stack-deploy.sh
+  # Fleet 和 Stack 在自定义镜像制作完成后通过脚本创建
+  # 支持多个 Fleet（不同实例类型/镜像），共用同一套网络资源
+  # 执行: bash scripts/fleet-stack-deploy.sh <region> <fleet-name> <image> <min> <max> <instance-type> <fleet-type>
   # ============================================================
 
-  # ============================================================
-  # Outputs
-  # ============================================================
 Outputs:
   VpcId:
     Description: VPC ID
@@ -451,7 +429,7 @@ Outputs:
       Name: !Sub ${EnvironmentName}-ImageBuilderSgId
 
   FleetSecurityGroupId:
-    Description: Fleet Security Group ID
+    Description: Fleet Security Group ID (所有 Fleet 共用)
     Value: !Ref FleetSecurityGroup
     Export:
       Name: !Sub ${EnvironmentName}-FleetSgId
@@ -467,9 +445,3 @@ Outputs:
     Value: !Ref AppStreamImageBuilder
     Export:
       Name: !Sub ${EnvironmentName}-ImageBuilderName
-
-  SelectedInstanceType:
-    Description: 用户选择的实例类型（供 fleet-stack-deploy.sh 读取）
-    Value: !Ref FleetInstanceType
-    Export:
-      Name: !Sub ${EnvironmentName}-FleetInstanceType

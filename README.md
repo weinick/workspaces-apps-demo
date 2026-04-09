@@ -1,239 +1,198 @@
-# WorkSpaces Applications Demo 部署说明
-## Mendix Studio Pro + RapidMiner (Altair AI Studio) on AWS
+# Amazon WorkSpaces Applications 通用部署方案
+
+AWS WorkSpaces Applications (AppStream 2.0) 的一键部署工具，支持多 Fleet、多镜像、多客户场景。
 
 ---
 
-## 文件清单
-
-| 文件 | 说明 |
-|------|------|
-| `cfn-workspaces-apps-demo.yaml` | CloudFormation 主模板（VPC + Image Builder） |
-| `fleet-stack-deploy.sh` | Fleet + Stack + 用户关联脚本（镜像制作完成后执行） |
-| `imagebuilder-setup.sh` | 生成 Image Builder 登录 URL 的脚本 |
-
----
-
-## 部署流程概览
+## 文件结构
 
 ```
-Step 1: 准备软件安装包
-Step 2: 部署 CloudFormation（VPC + Image Builder）
-Step 3: 登录 Image Builder 安装软件 + 制作镜像
-Step 4: 执行 fleet-stack-deploy.sh 创建 Fleet + Stack
-Step 5: 用户访问验证
+├── cfn-workspaces-apps-demo.yaml   # CloudFormation 模板（VPC + Image Builder 基础设施）
+└── scripts/
+    ├── imagebuilder-setup.sh       # 生成 Image Builder 登录 URL + S3 Presigned URL
+    ├── fleet-stack-deploy.sh       # 创建 Fleet + Stack + Auto Scaling（支持多 Fleet）
+    ├── scale-fleet.sh              # Fleet 预热 / 扩缩容 / 归零
+    ├── generate-urls.sh            # 批量生成学员 Streaming URL
+    └── cleanup.sh                  # 清理资源
 ```
-
----
-
-## Step 1：准备软件安装包
-
-在本机下载以下软件的 Windows 安装包：
-
-### Mendix Studio Pro
-- 下载地址：https://marketplace.mendix.com/link/studiopro（需登录 Mendix 账号）
-- 推荐版本：10.24.x LTS
-- 文件名示例：`MendixStudioPro-10.24.0.exe`
-
-### RapidMiner Studio（现为 Altair AI Studio）
-- 下载地址：https://altair.com/altair-rapidminer（需注册 Altair 账号）
-- 文件名示例：`altair-aistudio-win64-install.exe`
-
-上传到 S3（CloudFormation 部署后会创建 Bucket）：
-
-```bash
-BUCKET_NAME=$(aws cloudformation describe-stacks \
-  --stack-name siemens-demo \
-  --region ap-southeast-1 \
-  --query 'Stacks[0].Outputs[?OutputKey==`InstallerBucketName`].OutputValue' \
-  --output text)
-
-aws s3 cp MendixStudioPro-10.24.0.exe s3://$BUCKET_NAME/installers/
-aws s3 cp altair-aistudio-win64-install.exe s3://$BUCKET_NAME/installers/
-```
-
----
-
-## Step 2：部署 CloudFormation
-
-```bash
-aws cloudformation deploy \
-  --template-file cfn-workspaces-apps-demo.yaml \
-  --stack-name siemens-demo \
-  --region ap-southeast-1 \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides \
-    EnvironmentName=siemens-demo \
-    InstallerBucketName=siemens-demo-installers \
-    MendixInstallerKey=installers/MendixStudioPro-10.24.0.exe \
-    RapidMinerInstallerKey=installers/altair-aistudio-win64-install.exe
-```
-
-部署时间约 **10-15 分钟**（主要等待 Image Builder 启动）。
-
-> ⚠️ 前置条件：
-> - 区域 ap-southeast-1 已有 `Graphics G4DN xlarge` 配额（Image Builder ≥1，Fleet ≥1）
-> - IAM Role 有 CloudFormation、EC2、AppStream、S3、IAM 权限
-
----
-
-## Step 3：登录 Image Builder 安装软件
-
-### 3.1 上传软件安装包到 S3
-
-先将安装包上传到 CloudFormation 创建的 S3 Bucket：
-
-```bash
-# 获取 Bucket 名称
-BUCKET=$(aws cloudformation describe-stacks \
-  --stack-name siemens-demo \
-  --region ap-southeast-1 \
-  --query 'Stacks[0].Outputs[?OutputKey==`InstallerBucketName`].OutputValue' \
-  --output text)
-
-# 上传安装包（按需上传，支持一个或多个）
-aws s3 cp MendixStudioPro-10.24.0.exe s3://$BUCKET/installers/ --region ap-southeast-1
-aws s3 cp ai-studio-win64-install.exe s3://$BUCKET/installers/ --region ap-southeast-1
-```
-
-### 3.2 生成 Presigned URL + Image Builder 登录 URL
-
-```bash
-bash imagebuilder-setup.sh ap-southeast-1 siemens-demo
-```
-
-脚本会自动完成：
-- ✅ 检查 S3 中的安装包
-- ✅ 为每个安装包生成 **Presigned URL**（1小时有效，无需 AWS 凭证即可下载）
-- ✅ 生成 Image Builder **登录 URL**
-- ✅ 输出可直接粘贴到 Image Builder 内的 PowerShell 下载命令
-
-### 3.3 在 Windows 桌面安装软件
-
-用登录 URL 进入 Image Builder Windows 桌面后，打开 PowerShell（管理员），将脚本输出的下载命令粘贴执行（使用 Presigned URL 下载，无需配置 AWS 凭证）：
-
-```powershell
-# 示例（脚本会自动生成实际命令）
-Invoke-WebRequest -Uri "<presigned-url>" -OutFile "C:\Users\Administrator\Downloads\installer.exe"
-
-# 静默安装 Mendix Studio Pro
-C:\Users\Administrator\Downloads\MendixStudioPro-10.24.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-
-# 安装 Altair AI Studio
-C:\Users\Administrator\Downloads\ai-studio-installer.exe -q
-```
-
-### 3.3 使用 Image Assistant 打包镜像
-
-1. 双击桌面上的 **Image Assistant** 图标
-2. 点击 **"Add App"**，依次添加：
-   - Mendix Studio Pro（`C:\Program Files\Mendix\Studio Pro 10.24.0\studiopro.exe`）
-   - Altair AI Studio（`C:\Program Files\Altair\AIStudio\aistudio.exe`）
-3. 配置好应用图标和显示名称后点击 **"Next"**
-4. 在 **"Create Image"** 页面输入镜像名称：`siemens-demo-custom-image-v1`
-5. 点击 **"Create Image"** — 实例会自动关闭并开始制作镜像
-
-镜像制作时间约 **20-30 分钟**。
-
-查看镜像状态：
-```bash
-aws appstream describe-images \
-  --names siemens-demo-custom-image-v1 \
-  --region ap-southeast-1 \
-  --query 'Images[0].State'
-```
-
----
-
-## Step 4：创建 Fleet + Stack + 关联用户
-
-镜像状态变为 `AVAILABLE` 后执行：
-
-```bash
-bash fleet-stack-deploy.sh \
-  <region> \
-  <env-name> \
-  <custom-image-name> \
-  <test-user-email>
-
-# 示例：
-# bash fleet-stack-deploy.sh ap-southeast-1 siemens-demo siemens-demo-custom-image-v1 user@example.com
-```
-
-脚本会自动完成：
-- ✅ 创建 G4DN xlarge Fleet（ON_DEMAND 模式）
-- ✅ 创建 Stack（配置剪贴板/文件上传下载权限）
-- ✅ 关联 Fleet 和 Stack
-- ✅ 创建测试用户（由 `<test-user-email>` 参数指定）
-- ✅ 输出 Streaming URL
-
----
-
-## Step 5：用户访问
-
-### 方式一：User Pool 邀请邮件
-指定的测试用户邮箱会收到邀请邮件，点击链接设置密码后即可访问。
-
-### 方式二：临时 Streaming URL（测试用）
-脚本执行完成后会输出一个临时 URL（1小时有效），直接在浏览器中打开即可访问应用。
 
 ---
 
 ## 架构说明
 
 ```
-Internet
-    │
-    ├── Public Subnet (NAT Gateway)
-    │
-    └── Private Subnet
-            ├── Image Builder (stream.graphics.g4dn.xlarge)
-            └── Fleet Instance (stream.graphics.g4dn.xlarge)
-                    ├── Mendix Studio Pro 10.24.x
-                    └── Altair AI Studio (RapidMiner)
+CloudFormation（一次部署）
+    └── VPC + 子网 + NAT Gateway
+    └── Security Groups
+    └── S3 Bucket（软件安装包）
+    └── IAM Role
+    └── Image Builder（制作自定义镜像）
+
+fleet-stack-deploy.sh（可多次执行，支持多 Fleet）
+    ├── Fleet A（非 GPU）── Stack A  →  generate-urls.sh
+    └── Fleet B（GPU）── Stack B    →  generate-urls.sh
 ```
 
-- **网络**：Image Builder 和 Fleet 放在私有子网，通过 NAT Gateway 访问互联网
-- **实例类型**：`stream.graphics.g4dn.xlarge`（4 vCPU, 16GB RAM, NVIDIA T4 GPU）
-- **Fleet 模式**：ON_DEMAND（按需启动，无用户时不计费）
-- **最大会话时长**：2 小时（可调整）
-- **空闲断开**：10 分钟无操作自动断开
+**设计原则：**
+- CFN 只管基础设施，Fleet/Stack 通过脚本创建，支持灵活组合
+- 多个 Fleet 共用同一套 VPC/网络资源，通过 `fleet-suffix` 区分
+- 每个 Fleet 可独立设置实例类型、镜像、Fleet 类型
 
 ---
 
-## 成本估算（ap-southeast-1 新加坡）
+## 部署流程
 
-| 资源 | 单价 | 说明 |
-|------|------|------|
-| stream.graphics.g4dn.xlarge | ~$1.06/小时 | 用户会话期间计费 |
-| Image Builder | ~$1.06/小时 | 仅制作镜像时计费，完成后删除 |
-| NAT Gateway | ~$0.059/小时 + 数据费 | 持续运行 |
-| S3 安装包存储 | < $0.01/月 | 忽略不计 |
+### Step 1：部署 CloudFormation（基础设施）
+
+```bash
+aws cloudformation deploy \
+  --template-file cfn-workspaces-apps-demo.yaml \
+  --stack-name <env-name> \
+  --region <region> \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    EnvironmentName=<env-name> \
+    InstallerBucketName=<bucket-name> \
+    ImageBuilderInstanceType=stream.graphics.g4dn.xlarge \
+    BaseImageName=AppStream-Graphics-G4dn-WinServer2022-11-10-2025
+```
+
+部署约 10-15 分钟，完成后会创建：VPC、子网、NAT Gateway、S3 Bucket、Image Builder。
+
+---
+
+### Step 2：上传软件安装包到 S3
+
+```bash
+BUCKET=$(aws cloudformation describe-stacks \
+  --stack-name <env-name> --region <region> \
+  --query 'Stacks[0].Outputs[?OutputKey==`InstallerBucketName`].OutputValue' \
+  --output text)
+
+aws s3 cp <installer.exe> s3://$BUCKET/installers/ --region <region>
+```
+
+---
+
+### Step 3：制作自定义镜像
+
+```bash
+# 生成 Image Builder 登录 URL
+bash scripts/imagebuilder-setup.sh <region> <env-name>
+```
+
+登录 Image Builder Windows 桌面后：
+1. 安装所需软件
+2. 双击桌面 **Image Assistant** → Add App → 填写镜像名称 → Create Image
+
+镜像制作约 20-30 分钟，查看状态：
+```bash
+aws appstream describe-images \
+  --names <image-name> \
+  --region <region> \
+  --query 'Images[0].State'
+```
+
+---
+
+### Step 4：创建 Fleet + Stack
+
+```bash
+bash scripts/fleet-stack-deploy.sh \
+  <region> \
+  <env-name> \
+  <image-name> \
+  <fleet-suffix> \
+  <min-capacity> \
+  <max-capacity> \
+  <instance-type> \
+  <fleet-type>
+```
+
+**Fleet 类型说明：**
+
+| 类型 | 计费方式 | 启动延迟 | 适用场景 |
+|------|----------|----------|----------|
+| `ON_DEMAND` | 用户连接时按运行实例收费，空闲时收极小的 stopped 费用 | 1-2 分钟 | 培训、演示、非实时场景 |
+| `ALWAYS_ON` | 实例持续运行，无论是否有用户均按全价计费 | 即时 | 企业生产环境、要求零等待 |
+| `ELASTIC` | 仅 streaming 会话期间计费（按秒，最低 15 分钟），需使用 App Block | 较长（含下载） | 低频使用、轻量应用 |
+
+---
+
+### Step 5：预热实例（培训前）
+
+```bash
+# 预热并等待所有实例就绪
+ENV_NAME=<env-name>-<fleet-suffix> bash scripts/scale-fleet.sh warmup <count>
+
+# 查看状态
+ENV_NAME=<env-name>-<fleet-suffix> bash scripts/scale-fleet.sh status
+```
+
+---
+
+### Step 6：生成 Streaming URL
+
+```bash
+bash scripts/generate-urls.sh <region> <env-name>-<fleet-suffix> <user-count> <validity-hours>
+```
+
+---
+
+### Step 7：培训结束归零
+
+```bash
+ENV_NAME=<env-name>-<fleet-suffix> bash scripts/scale-fleet.sh down
+```
+
+---
+
+## 多 Fleet 场景示例
+
+同一客户有两类培训软件，一类不需要 GPU，一类需要 GPU：
+
+```bash
+# Fleet 1：通用软件（无 GPU，成本低）
+bash scripts/fleet-stack-deploy.sh \
+  ap-southeast-1 my-demo standard-image-v1 standard \
+  2 30 stream.standard.xlarge ON_DEMAND
+
+# Fleet 2：AI/图形软件（GPU）
+bash scripts/fleet-stack-deploy.sh \
+  ap-southeast-1 my-demo gpu-image-v1 gpu \
+  2 30 stream.graphics.g4dn.xlarge ON_DEMAND
+
+# 分别预热
+ENV_NAME=my-demo-standard bash scripts/scale-fleet.sh warmup 30
+ENV_NAME=my-demo-gpu      bash scripts/scale-fleet.sh warmup 20
+
+# 分别生成 URL
+bash scripts/generate-urls.sh ap-southeast-1 my-demo-standard 30 3
+bash scripts/generate-urls.sh ap-southeast-1 my-demo-gpu      20 3
+
+# 分别归零
+ENV_NAME=my-demo-standard bash scripts/scale-fleet.sh down
+ENV_NAME=my-demo-gpu      bash scripts/scale-fleet.sh down
+```
+
+---
+
+## 成本估算参考（ap-southeast-1）
+
+| 实例类型 | 运行费 | Stopped 费 | 适用软件 |
+|----------|--------|------------|----------|
+| stream.standard.xlarge | ~$0.30/hr | $0.025/hr | 办公/浏览器/轻量 IDE |
+| stream.graphics.g4dn.xlarge | ~$1.45/hr | $0.025/hr | AI Studio、图形软件 |
+
+> ON_DEMAND 模式下，无用户连接时仅收 $0.025/hr/实例（所有实例类型统一价）
 
 ---
 
 ## 清理资源
 
 ```bash
-# 停止 Fleet
-aws appstream stop-fleet --name siemens-demo-fleet --region ap-southeast-1
+bash scripts/cleanup.sh <region> <env-name> <fleet-suffix>
 
-# 删除 Stack 和 Fleet 关联
-aws appstream disassociate-fleet \
-  --fleet-name siemens-demo-fleet \
-  --stack-name siemens-demo-stack \
-  --region ap-southeast-1
-
-# 删除 Stack 和 Fleet
-aws appstream delete-stack --name siemens-demo-stack --region ap-southeast-1
-aws appstream delete-fleet --name siemens-demo-fleet --region ap-southeast-1
-
-# 删除自定义镜像
-aws appstream delete-image --name siemens-demo-custom-image-v1 --region ap-southeast-1
-
-# 删除 CloudFormation Stack（会删除 VPC、S3 等）
-aws cloudformation delete-stack --stack-name siemens-demo --region ap-southeast-1
+# 完整清理 CFN 基础设施（删除 VPC、S3 等）
+aws cloudformation delete-stack --stack-name <env-name> --region <region>
 ```
-
----
-
-*生成时间：2026-04-08 | 区域：ap-southeast-1（新加坡）*

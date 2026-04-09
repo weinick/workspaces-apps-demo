@@ -1,75 +1,109 @@
 #!/bin/bash
 # fleet-stack-deploy.sh
 # 创建 Fleet、Stack 和 Auto Scaling 策略（一次性基础设施部署）
-# 前置条件: cfn-workspaces-apps-demo.yaml 已部署完成
+# 前置条件: cfn-workspaces-apps-demo.yaml 已部署完成，自定义镜像已制作完成
 # URL 生成请使用 generate-urls.sh
+# 扩缩容管理请使用 scale-fleet.sh
+#
+# 支持多 Fleet 场景：同一套 CFN 基础设施可部署多个 Fleet
+# 只需用不同的 fleet-suffix 区分即可，如:
+#   bash fleet-stack-deploy.sh ap-southeast-1 my-demo standard-image  standard  2 20 stream.standard.xlarge  ON_DEMAND
+#   bash fleet-stack-deploy.sh ap-southeast-1 my-demo gpu-image       gpu       2 20 stream.graphics.g4dn.xlarge ON_DEMAND
 
 set -euo pipefail
 
 REGION="${1:-ap-southeast-1}"
-ENV_NAME="${2:-siemens-demo}"
-CUSTOM_IMAGE_NAME="${3:-}"   # 必须提供
-MIN_CAPACITY="${4:-2}"       # Fleet 最小实例数（热备数量）
-MAX_CAPACITY="${5:-10}"      # Fleet 最大实例数（Auto Scaling 上限）
-# 参数6: 实例类型（可选，不传则从 CFN stack 参数自动读取）
-INSTANCE_TYPE_OVERRIDE="${6:-}"
+CFN_STACK_NAME="${2:-my-demo}"      # CFN Stack 名称（读取网络配置用）
+CUSTOM_IMAGE_NAME="${3:-}"          # 必须提供：自定义镜像名称
+FLEET_SUFFIX="${4:-}"               # 必须提供：Fleet 标识后缀，如 standard / gpu / training
+MIN_CAPACITY="${5:-2}"              # Fleet 最小实例数
+MAX_CAPACITY="${6:-20}"             # Fleet 最大实例数（Auto Scaling 上限）
+FLEET_INSTANCE_TYPE="${7:-}"        # 必须提供：实例类型
+FLEET_TYPE="${8:-ON_DEMAND}"        # Fleet 类型（ON_DEMAND / ALWAYS_ON / ELASTIC）
 
-if [[ -z "$CUSTOM_IMAGE_NAME" ]]; then
-  echo "Usage: $0 <region> <env-name> <custom-image-name> [min-capacity] [max-capacity] [instance-type]"
-  echo "Example: $0 ap-southeast-1 my-demo my-custom-image-v1 2 20"
-  echo "Example: $0 ap-southeast-1 my-demo my-custom-image-v1 2 20 stream.graphics.g5.xlarge"
+# ============================================================
+# 帮助信息
+# ============================================================
+usage() {
+  echo "Usage: $0 <region> <cfn-stack-name> <image-name> <fleet-suffix> [min] [max] <instance-type> [fleet-type]"
   echo ""
-  echo "Parameters:"
-  echo "  min-capacity   最小实例数，培训前预热，建议设为最大同时在线用户数  (default: 2)"
-  echo "  max-capacity   最大实例数，Auto Scaling 上限  (default: 10)"
-  echo "  instance-type  实例类型，不填则自动读取 CFN 参数 FleetInstanceType"
+  echo "必填参数:"
+  echo "  region          AWS 区域 (如 ap-southeast-1)"
+  echo "  cfn-stack-name  CloudFormation Stack 名称（提供网络配置）"
+  echo "  image-name      自定义镜像名称（镜像制作完成后的名称）"
+  echo "  fleet-suffix    Fleet 标识后缀，用于区分多个 Fleet（如 standard / gpu / training）"
+  echo "  instance-type   实例类型（见下方参考）"
+  echo ""
+  echo "可选参数:"
+  echo "  min             最小实例数，默认 2"
+  echo "  max             最大实例数（Auto Scaling 上限），默认 20"
+  echo "  fleet-type      Fleet 类型，默认 ON_DEMAND"
+  echo ""
+  echo "Fleet 类型说明:"
+  echo "  ON_DEMAND   按需启动，有用户时才计全价，无用户时收极小的 stopped 费用。"
+  echo "              用户连接时等待 1-2 分钟实例启动。"
+  echo "              适合: 培训、演示、非实时性场景。"
+  echo ""
+  echo "  ALWAYS_ON   实例持续运行，用户连接即时无等待，但无论是否有用户均按全价计费。"
+  echo "              适合: 企业生产环境、要求零等待的 SaaS 应用。"
+  echo ""
+  echo "  ELASTIC     由 AWS 全托管扩缩容，仅在 streaming 会话期间计费（按秒，最低 15 分钟）。"
+  echo "              需要使用 App Block 打包应用（非镜像方式），启动时需下载挂载，延迟较高。"
+  echo "              适合: 低频使用、对启动速度不敏感的轻量应用。"
   echo ""
   echo "实例类型参考:"
-  echo "  通用:    stream.standard.medium / large / xlarge / 2xlarge"
-  echo "  计算优化: stream.compute.large / xlarge / 2xlarge / 4xlarge"
-  echo "  内存优化: stream.memory.large / xlarge / 2xlarge / 4xlarge"
+  echo "  通用:     stream.standard.medium / large / xlarge / 2xlarge"
+  echo "  计算优化: stream.compute.large / xlarge / 2xlarge / 4xlarge / 8xlarge"
+  echo "  内存优化: stream.memory.large / xlarge / 2xlarge / 4xlarge / 8xlarge"
   echo "  GPU G4dn: stream.graphics.g4dn.xlarge / 2xlarge / 4xlarge  (NVIDIA T4)"
-  echo "  GPU G5:  stream.graphics.g5.xlarge / 2xlarge / 4xlarge     (NVIDIA A10G)"
-  echo "  GPU G6:  stream.graphics.g6.xlarge / 2xlarge / 4xlarge     (NVIDIA L4)"
+  echo "  GPU G5:   stream.graphics.g5.xlarge / 2xlarge / 4xlarge    (NVIDIA A10G)"
+  echo "  GPU G6:   stream.graphics.g6.xlarge / 2xlarge / 4xlarge    (NVIDIA L4)"
+  echo ""
+  echo "多 Fleet 示例:"
+  echo "  # 非 GPU Fleet（通用软件）"
+  echo "  $0 ap-southeast-1 my-demo my-standard-image-v1 standard 2 20 stream.standard.xlarge ON_DEMAND"
+  echo ""
+  echo "  # GPU Fleet（AI/图形软件）"
+  echo "  $0 ap-southeast-1 my-demo my-gpu-image-v1 gpu 2 20 stream.graphics.g4dn.xlarge ON_DEMAND"
+  exit 1
+}
+
+if [[ -z "$CUSTOM_IMAGE_NAME" || -z "$FLEET_SUFFIX" || -z "$FLEET_INSTANCE_TYPE" ]]; then
+  usage
+fi
+
+# 校验 Fleet 类型
+if [[ "$FLEET_TYPE" != "ON_DEMAND" && "$FLEET_TYPE" != "ALWAYS_ON" && "$FLEET_TYPE" != "ELASTIC" ]]; then
+  echo "❌ 无效的 fleet-type: '$FLEET_TYPE'，必须为 ON_DEMAND / ALWAYS_ON / ELASTIC"
   exit 1
 fi
 
-FLEET_NAME="${ENV_NAME}-fleet"
-STACK_NAME="${ENV_NAME}-stack"
+FLEET_NAME="${CFN_STACK_NAME}-${FLEET_SUFFIX}-fleet"
+STACK_NAME="${CFN_STACK_NAME}-${FLEET_SUFFIX}-stack"
 
 # ============================================================
-# 读取 CFN 配置
+# 读取 CFN 网络配置
 # ============================================================
-echo "=== 读取 CloudFormation 配置 ==="
+echo "=== 读取 CloudFormation 网络配置 ==="
 PRIVATE_SUBNET=$(aws cloudformation describe-stacks \
-  --stack-name "$ENV_NAME" --region "$REGION" \
+  --stack-name "$CFN_STACK_NAME" --region "$REGION" \
   --query 'Stacks[0].Outputs[?OutputKey==`PrivateSubnet1Id`].OutputValue' \
   --output text)
 
 FLEET_SG=$(aws cloudformation describe-stacks \
-  --stack-name "$ENV_NAME" --region "$REGION" \
+  --stack-name "$CFN_STACK_NAME" --region "$REGION" \
   --query 'Stacks[0].Outputs[?OutputKey==`FleetSecurityGroupId`].OutputValue' \
   --output text)
 
-# 实例类型：优先用命令行参数，其次从 CFN Parameters 读取
-if [[ -n "$INSTANCE_TYPE_OVERRIDE" ]]; then
-  FLEET_INSTANCE_TYPE="$INSTANCE_TYPE_OVERRIDE"
-  echo "实例类型: $FLEET_INSTANCE_TYPE (命令行指定)"
-else
-  FLEET_INSTANCE_TYPE=$(aws cloudformation describe-stacks \
-    --stack-name "$ENV_NAME" --region "$REGION" \
-    --query 'Stacks[0].Parameters[?ParameterKey==`FleetInstanceType`].ParameterValue' \
-    --output text)
-  if [[ -z "$FLEET_INSTANCE_TYPE" || "$FLEET_INSTANCE_TYPE" == "None" ]]; then
-    echo "⚠️  CFN 中未找到 FleetInstanceType 参数，使用默认值 stream.graphics.g4dn.xlarge"
-    FLEET_INSTANCE_TYPE="stream.graphics.g4dn.xlarge"
-  else
-    echo "实例类型: $FLEET_INSTANCE_TYPE (从 CFN 参数读取)"
-  fi
-fi
-
-echo "Subnet: $PRIVATE_SUBNET | SG: $FLEET_SG"
-echo "容量配置: Min=$MIN_CAPACITY, Max=$MAX_CAPACITY"
+echo "CFN Stack:    $CFN_STACK_NAME"
+echo "Fleet:        $FLEET_NAME"
+echo "Stack:        $STACK_NAME"
+echo "Image:        $CUSTOM_IMAGE_NAME"
+echo "实例类型:     $FLEET_INSTANCE_TYPE"
+echo "Fleet 类型:   $FLEET_TYPE"
+echo "容量:         Min=$MIN_CAPACITY, Max=$MAX_CAPACITY"
+echo "Subnet:       $PRIVATE_SUBNET"
+echo "SG:           $FLEET_SG"
 
 # ============================================================
 # 1. 创建 Fleet
@@ -86,12 +120,12 @@ if [[ -z "$FLEET_EXISTS" || "$FLEET_EXISTS" == "None" ]]; then
     --name "$FLEET_NAME" \
     --image-name "$CUSTOM_IMAGE_NAME" \
     --instance-type "$FLEET_INSTANCE_TYPE" \
-    --fleet-type "ON_DEMAND" \
+    --fleet-type "$FLEET_TYPE" \
     --compute-capacity DesiredInstances="$MIN_CAPACITY" \
     --region "$REGION" \
     --vpc-config SubnetIds="$PRIVATE_SUBNET",SecurityGroupIds="$FLEET_SG" \
-    --display-name "${ENV_NAME} Fleet (${FLEET_INSTANCE_TYPE})" \
-    --description "WorkSpaces Applications Fleet - ${ENV_NAME}" \
+    --display-name "${CFN_STACK_NAME} ${FLEET_SUFFIX} Fleet (${FLEET_INSTANCE_TYPE})" \
+    --description "WorkSpaces Applications Fleet - ${CFN_STACK_NAME}/${FLEET_SUFFIX}" \
     --stream-view DESKTOP \
     --max-user-duration-in-seconds 9000 \
     --disconnect-timeout-in-seconds 9000 \
@@ -115,36 +149,39 @@ done
 echo "Fleet RUNNING ✅"
 
 # ============================================================
-# 2. 配置 Auto Scaling
+# 2. 配置 Auto Scaling（ELASTIC 不支持 Auto Scaling）
 # ============================================================
 echo ""
 echo "=== [2/5] 配置 Auto Scaling ==="
 
-aws application-autoscaling register-scalable-target \
-  --service-namespace appstream \
-  --resource-id "fleet/$FLEET_NAME" \
-  --scalable-dimension appstream:fleet:DesiredCapacity \
-  --min-capacity "$MIN_CAPACITY" \
-  --max-capacity "$MAX_CAPACITY" \
-  --region "$REGION"
-echo "Scalable target 注册 ✅ (Min: $MIN_CAPACITY, Max: $MAX_CAPACITY)"
+if [[ "$FLEET_TYPE" == "ELASTIC" ]]; then
+  echo "ℹ️  ELASTIC fleet 由 AWS 全托管扩缩容，跳过 Auto Scaling 配置"
+else
+  aws application-autoscaling register-scalable-target \
+    --service-namespace appstream \
+    --resource-id "fleet/$FLEET_NAME" \
+    --scalable-dimension appstream:fleet:DesiredCapacity \
+    --min-capacity "$MIN_CAPACITY" \
+    --max-capacity "$MAX_CAPACITY" \
+    --region "$REGION"
 
-aws application-autoscaling put-scaling-policy \
-  --policy-name "${FLEET_NAME}-scale-out" \
-  --service-namespace appstream \
-  --resource-id "fleet/$FLEET_NAME" \
-  --scalable-dimension appstream:fleet:DesiredCapacity \
-  --policy-type TargetTrackingScaling \
-  --target-tracking-scaling-policy-configuration '{
-    "TargetValue": 75.0,
-    "PredefinedMetricSpecification": {
-      "PredefinedMetricType": "AppStreamAverageCapacityUtilization"
-    },
-    "ScaleOutCooldown": 60,
-    "ScaleInCooldown": 300
-  }' \
-  --region "$REGION" > /dev/null
-echo "Auto Scaling 策略配置 ✅ (目标利用率: 75%, 扩容冷却: 60s, 缩容冷却: 300s)"
+  aws application-autoscaling put-scaling-policy \
+    --policy-name "${FLEET_NAME}-scale-out" \
+    --service-namespace appstream \
+    --resource-id "fleet/$FLEET_NAME" \
+    --scalable-dimension appstream:fleet:DesiredCapacity \
+    --policy-type TargetTrackingScaling \
+    --target-tracking-scaling-policy-configuration '{
+      "TargetValue": 75.0,
+      "PredefinedMetricSpecification": {
+        "PredefinedMetricType": "AppStreamAverageCapacityUtilization"
+      },
+      "ScaleOutCooldown": 60,
+      "ScaleInCooldown": 300
+    }' \
+    --region "$REGION" > /dev/null
+  echo "Auto Scaling 配置 ✅ (Min: $MIN_CAPACITY, Max: $MAX_CAPACITY, 目标利用率: 75%)"
+fi
 
 # ============================================================
 # 3. 创建 Stack
@@ -159,8 +196,8 @@ STACK_EXISTS=$(aws appstream describe-stacks \
 if [[ -z "$STACK_EXISTS" || "$STACK_EXISTS" == "None" ]]; then
   aws appstream create-stack \
     --name "$STACK_NAME" \
-    --display-name "${ENV_NAME} Stack" \
-    --description "WorkSpaces Applications Stack - ${ENV_NAME}" \
+    --display-name "${CFN_STACK_NAME} ${FLEET_SUFFIX} Stack" \
+    --description "WorkSpaces Applications Stack - ${CFN_STACK_NAME}/${FLEET_SUFFIX}" \
     --region "$REGION" \
     --user-settings \
       Action=CLIPBOARD_COPY_FROM_LOCAL_DEVICE,Permission=ENABLED \
@@ -191,14 +228,18 @@ echo ""
 echo "=== [5/5] 部署汇总 ==="
 echo ""
 echo "=============================="
-echo "✅ 基础设施部署完成！"
+echo "✅ Fleet 部署完成！"
 echo "=============================="
-echo "Fleet:         $FLEET_NAME (RUNNING)"
-echo "Stack:         $STACK_NAME"
-echo "实例类型:       $FLEET_INSTANCE_TYPE"
-echo "Auto Scaling:  Min=$MIN_CAPACITY, Max=$MAX_CAPACITY"
-echo "会话最大时长:   2.5 小时"
+echo "Fleet:        $FLEET_NAME (RUNNING)"
+echo "Stack:        $STACK_NAME"
+echo "实例类型:     $FLEET_INSTANCE_TYPE"
+echo "Fleet 类型:   $FLEET_TYPE"
+echo "Auto Scaling: Min=$MIN_CAPACITY, Max=$MAX_CAPACITY"
+echo "会话最大时长: 2.5 小时"
 echo ""
-echo "下一步 - 生成学员 Streaming URL："
-echo "  bash generate-urls.sh $REGION $ENV_NAME <学员人数> <有效期小时>"
-echo "  示例: bash generate-urls.sh $REGION $ENV_NAME 20 3"
+echo "下一步 - 预热实例（培训前执行）："
+echo "  bash scale-fleet.sh warmup <count> （ENV_NAME=${CFN_STACK_NAME}-${FLEET_SUFFIX}）"
+echo "  ENV_NAME=${CFN_STACK_NAME}-${FLEET_SUFFIX} bash scale-fleet.sh warmup $MIN_CAPACITY"
+echo ""
+echo "下一步 - 生成 Streaming URL："
+echo "  bash generate-urls.sh $REGION ${CFN_STACK_NAME}-${FLEET_SUFFIX} <人数> <有效期小时>"
