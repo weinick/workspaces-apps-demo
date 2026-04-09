@@ -9,7 +9,9 @@ AWS WorkSpaces Applications (AppStream 2.0) 的一键部署工具，支持多 Fl
 ```
 ├── cfn-workspaces-apps-demo.yaml   # CloudFormation 模板（VPC + Image Builder 基础设施）
 └── scripts/
+    ├── pre-deploy-check.sh         # 部署前检查（Base Image、Quota、VPC 等）
     ├── imagebuilder-setup.sh       # 生成 Image Builder 登录 URL + S3 Presigned URL
+    ├── create-imagebuilder.sh      # 创建额外的 Image Builder（多实例系列场景）
     ├── fleet-stack-deploy.sh       # 创建 Fleet + Stack + Auto Scaling（支持多 Fleet）
     ├── scale-fleet.sh              # Fleet 预热 / 扩缩容 / 归零
     ├── generate-urls.sh            # 批量生成学员 Streaming URL
@@ -26,7 +28,10 @@ CloudFormation（一次部署）
     └── Security Groups
     └── S3 Bucket（软件安装包）
     └── IAM Role
-    └── Image Builder（制作自定义镜像）
+    └── Image Builder 主（GPU 系列，制作 GPU 镜像）
+
+create-imagebuilder.sh（按需执行，创建额外 Image Builder）
+    └── Image Builder 副（Standard 系列，制作非 GPU 镜像）
 
 fleet-stack-deploy.sh（可多次执行，支持多 Fleet）
     ├── Fleet A（非 GPU）── Stack A  →  generate-urls.sh
@@ -37,10 +42,23 @@ fleet-stack-deploy.sh（可多次执行，支持多 Fleet）
 - CFN 只管基础设施，Fleet/Stack 通过脚本创建，支持灵活组合
 - 多个 Fleet 共用同一套 VPC/网络资源，通过 `fleet-suffix` 区分
 - 每个 Fleet 可独立设置实例类型、镜像、Fleet 类型
+- **不同实例系列的镜像不能混用**：G4dn/G5/G6 镜像只能用于同系列 GPU Fleet；Standard/Compute/Memory 镜像用于非 GPU Fleet
 
 ---
 
 ## 部署流程
+
+### Step 0：部署前检查
+
+```bash
+bash scripts/pre-deploy-check.sh <region> <instance-type> <fleet-capacity>
+# 示例
+bash scripts/pre-deploy-check.sh ap-southeast-1 stream.graphics.g4dn.xlarge 20
+```
+
+自动检查 Base Image 可用性、Service Quota、VPC/EIP 配额，并输出推荐的 CFN 部署命令。
+
+---
 
 ### Step 1：部署 CloudFormation（基础设施）
 
@@ -76,10 +94,29 @@ aws s3 cp <installer.exe> s3://$BUCKET/installers/ --region <region>
 
 ### Step 3：制作自定义镜像
 
+#### 单一实例系列（只有一种 Fleet 类型）
+
 ```bash
-# 生成 Image Builder 登录 URL
+# 生成 CFN 创建的 Image Builder 登录 URL
 bash scripts/imagebuilder-setup.sh <region> <env-name>
 ```
+
+#### 多实例系列（同时有 GPU 和非 GPU Fleet）
+
+CFN 只创建了一个 Image Builder（主，如 G4dn），需要用脚本额外创建非 GPU 的 Image Builder：
+
+```bash
+# 创建额外的 Standard Image Builder（非 GPU 软件用）
+bash scripts/create-imagebuilder.sh <region> <env-name> standard \
+  stream.standard.xlarge \
+  AppStream-WinServer-WinServer2022-10-25-2024
+
+# 生成各 Image Builder 的登录 URL
+bash scripts/imagebuilder-setup.sh <region> <env-name>          # GPU Image Builder
+bash scripts/imagebuilder-setup.sh <region> <env-name> standard  # Standard Image Builder
+```
+
+> **镜像系列限制**：不同实例系列的镜像不可混用。G4dn Image Builder 制作的镜像只能用于 G4dn Fleet；Standard Image Builder 制作的镜像只能用于 Standard/Compute/Memory Fleet。
 
 登录 Image Builder Windows 桌面后：
 1. 安装所需软件
@@ -147,20 +184,36 @@ ENV_NAME=<env-name>-<fleet-suffix> bash scripts/scale-fleet.sh down
 
 ---
 
-## 多 Fleet 场景示例
+## 多 Fleet 场景示例（GPU + 非 GPU）
 
 同一客户有两类培训软件，一类不需要 GPU，一类需要 GPU：
 
 ```bash
+# Step 1: 部署前检查（两种实例类型分别检查）
+bash scripts/pre-deploy-check.sh ap-southeast-1 stream.graphics.g4dn.xlarge 20
+bash scripts/pre-deploy-check.sh ap-southeast-1 stream.standard.xlarge 30
+
+# Step 2: 部署 CFN（主 Image Builder 用 G4dn）
+aws cloudformation deploy ...
+
+# Step 3: 额外创建 Standard Image Builder
+bash scripts/create-imagebuilder.sh ap-southeast-1 my-demo standard \
+  stream.standard.xlarge AppStream-WinServer-WinServer2022-10-25-2024
+
+# Step 4: 分别制作镜像
+bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo          # GPU 镜像
+bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo standard  # 非 GPU 镜像
+
+# Step 5: 创建两个 Fleet
 # Fleet 1：通用软件（无 GPU，成本低）
 bash scripts/fleet-stack-deploy.sh \
   ap-southeast-1 my-demo standard-image-v1 standard \
-  2 30 stream.standard.xlarge ON_DEMAND
+  2 30 stream.standard.xlarge
 
 # Fleet 2：AI/图形软件（GPU）
 bash scripts/fleet-stack-deploy.sh \
   ap-southeast-1 my-demo gpu-image-v1 gpu \
-  2 30 stream.graphics.g4dn.xlarge ON_DEMAND
+  2 30 stream.graphics.g4dn.xlarge
 
 # 分别预热
 ENV_NAME=my-demo-standard bash scripts/scale-fleet.sh warmup 30
