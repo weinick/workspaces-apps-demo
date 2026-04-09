@@ -2,26 +2,46 @@
 # cleanup.sh
 # 一键清理 WorkSpaces Applications Demo 所有 AWS 资源
 # 顺序: Fleet → Stack → 自定义镜像 → Image Builder → CloudFormation Stack
+#
+# 用法:
+#   bash cleanup.sh <region> <env-name> <fleet-suffix> [custom-image-name]
+#
+# 示例（单 Fleet）:
+#   bash cleanup.sh ap-southeast-1 my-demo gpu my-gpu-image-v1
+#
+# 示例（多 Fleet，多次执行）:
+#   bash cleanup.sh ap-southeast-1 my-demo standard my-standard-image-v1
+#   bash cleanup.sh ap-southeast-1 my-demo gpu      my-gpu-image-v1
+#
+# 清理完所有 Fleet 后，最后删除 CFN 基础设施：
+#   aws cloudformation delete-stack --stack-name my-demo --region ap-southeast-1
 
 set -euo pipefail
 
 REGION="${1:-ap-southeast-1}"
-STACK_NAME="${2:-siemens-demo}"
-CUSTOM_IMAGE_NAME="${3:-siemens-demo-custom-image-v1}"
+CFN_STACK_NAME="${2:-my-demo}"
+FLEET_SUFFIX="${3:-}"
+CUSTOM_IMAGE_NAME="${4:-}"
 
-FLEET_NAME="${STACK_NAME}-fleet"
-STACK_AS_NAME="${STACK_NAME}-stack"
+if [[ -z "$FLEET_SUFFIX" ]]; then
+  echo "Usage: $0 <region> <cfn-stack-name> <fleet-suffix> [custom-image-name]"
+  echo "Example: $0 ap-southeast-1 my-demo gpu my-gpu-image-v1"
+  exit 1
+fi
+
+FLEET_NAME="${CFN_STACK_NAME}-${FLEET_SUFFIX}-fleet"
+STACK_NAME="${CFN_STACK_NAME}-${FLEET_SUFFIX}-stack"
 
 echo "=============================="
-echo "WorkSpaces Applications Demo"
-echo "Cleanup Script"
+echo "WorkSpaces Applications Cleanup"
 echo "=============================="
 echo ""
-echo "区域:   $REGION"
-echo "Stack:  $STACK_NAME"
-echo "镜像:   $CUSTOM_IMAGE_NAME"
+echo "Region:   $REGION"
+echo "Fleet:    $FLEET_NAME"
+echo "Stack:    $STACK_NAME"
+[[ -n "$CUSTOM_IMAGE_NAME" ]] && echo "Image:    $CUSTOM_IMAGE_NAME"
 echo ""
-read -p "⚠️  确认删除以上所有资源？(y/N) " CONFIRM
+read -r -p "⚠️  确认删除以上资源？(y/N) " CONFIRM
 if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
   echo "已取消"
   exit 0
@@ -29,7 +49,7 @@ fi
 echo ""
 
 # ---- 1. 停止 Fleet ----
-echo "=== [1/6] 停止 Fleet ==="
+echo "=== [1/5] 停止 Fleet ==="
 FLEET_STATE=$(aws appstream describe-fleets \
   --names "$FLEET_NAME" --region "$REGION" \
   --query 'Fleets[0].State' --output text 2>/dev/null || echo "NOT_FOUND")
@@ -47,69 +67,52 @@ fi
 
 # ---- 2. 解除 Fleet 与 Stack 的关联 ----
 echo ""
-echo "=== [2/6] 解除 Fleet-Stack 关联 ==="
+echo "=== [2/5] 解除 Fleet-Stack 关联 ==="
 aws appstream disassociate-fleet \
   --fleet-name "$FLEET_NAME" \
-  --stack-name "$STACK_AS_NAME" \
+  --stack-name "$STACK_NAME" \
   --region "$REGION" 2>/dev/null && echo "关联已解除 ✅" || echo "无关联，跳过"
 
 # ---- 3. 删除 Stack ----
 echo ""
-echo "=== [3/6] 删除 Stack ==="
+echo "=== [3/5] 删除 Stack ==="
 aws appstream delete-stack \
-  --name "$STACK_AS_NAME" \
+  --name "$STACK_NAME" \
   --region "$REGION" 2>/dev/null && echo "Stack 删除成功 ✅" || echo "Stack 不存在，跳过"
 
 # ---- 4. 删除 Fleet ----
 echo ""
-echo "=== [4/6] 删除 Fleet ==="
+echo "=== [4/5] 删除 Fleet ==="
 aws appstream delete-fleet \
   --name "$FLEET_NAME" \
   --region "$REGION" 2>/dev/null && echo "Fleet 删除成功 ✅" || echo "Fleet 不存在，跳过"
 
 # ---- 5. 删除自定义镜像 ----
 echo ""
-echo "=== [5/6] 删除自定义镜像 ==="
-IMAGE_STATE=$(aws appstream describe-images \
-  --names "$CUSTOM_IMAGE_NAME" --region "$REGION" \
-  --query 'Images[0].State' --output text 2>/dev/null || echo "NOT_FOUND")
-
-if [[ "$IMAGE_STATE" == "NOT_FOUND" || "$IMAGE_STATE" == "None" ]]; then
-  echo "镜像不存在，跳过"
+echo "=== [5/5] 删除自定义镜像 ==="
+if [[ -z "$CUSTOM_IMAGE_NAME" ]]; then
+  echo "未提供镜像名称，跳过"
 else
-  aws appstream delete-image \
-    --name "$CUSTOM_IMAGE_NAME" \
-    --region "$REGION" && echo "镜像删除成功 ✅" || echo "镜像删除失败（可能仍有 Fleet 依赖）"
-fi
+  IMAGE_STATE=$(aws appstream describe-images \
+    --names "$CUSTOM_IMAGE_NAME" --region "$REGION" \
+    --query 'Images[0].State' --output text 2>/dev/null || echo "NOT_FOUND")
 
-# ---- 6. 删除 CloudFormation Stack（含 VPC/S3/IAM/Image Builder） ----
-echo ""
-echo "=== [6/6] 删除 CloudFormation Stack ==="
-CFN_STATE=$(aws cloudformation describe-stacks \
-  --stack-name "$STACK_NAME" --region "$REGION" \
-  --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "NOT_FOUND")
-
-if [[ "$CFN_STATE" == "NOT_FOUND" ]]; then
-  echo "CloudFormation Stack 不存在，跳过"
-else
-  # 清空 S3 Bucket 再删 CFN（否则 S3 非空会删除失败）
-  BUCKET=$(aws cloudformation describe-stacks \
-    --stack-name "$STACK_NAME" --region "$REGION" \
-    --query 'Stacks[0].Outputs[?OutputKey==`InstallerBucketName`].OutputValue' \
-    --output text 2>/dev/null || echo "")
-
-  if [[ -n "$BUCKET" && "$BUCKET" != "None" ]]; then
-    echo "清空 S3 Bucket: $BUCKET ..."
-    aws s3 rm "s3://$BUCKET" --recursive --region "$REGION" 2>/dev/null && echo "S3 清空 ✅" || echo "S3 已为空"
+  if [[ "$IMAGE_STATE" == "NOT_FOUND" || "$IMAGE_STATE" == "None" ]]; then
+    echo "镜像不存在，跳过"
+  else
+    aws appstream delete-image \
+      --name "$CUSTOM_IMAGE_NAME" \
+      --region "$REGION" && echo "镜像删除成功 ✅" || echo "镜像删除失败（可能仍有 Fleet 依赖）"
   fi
-
-  aws cloudformation delete-stack --stack-name "$STACK_NAME" --region "$REGION"
-  echo "等待 CloudFormation Stack 删除（约 5-10 分钟）..."
-  aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME" --region "$REGION"
-  echo "CloudFormation Stack 删除完成 ✅"
 fi
 
 echo ""
 echo "=============================="
-echo "✅ 清理完成！所有资源已删除"
+echo "✅ Fleet 资源清理完成"
 echo "=============================="
+echo ""
+echo "如需删除 Image Builder（如不再制作镜像）："
+echo "  bash scripts/delete-imagebuilder.sh $REGION $CFN_STACK_NAME"
+echo ""
+echo "如需删除全部基础设施（VPC、S3、IAM 等），请在所有 Fleet 清理完后执行："
+echo "  aws cloudformation delete-stack --stack-name $CFN_STACK_NAME --region $REGION"
