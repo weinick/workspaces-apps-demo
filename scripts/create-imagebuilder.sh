@@ -6,8 +6,10 @@
 #   - 额外的 Image Builder 通过本脚本创建，共用同一套 VPC/SG
 #
 # 注意：镜像和 Fleet 实例类型的匹配关系：
-#   - Standard/Compute/Memory Image Builder 制作的镜像只包含普通驱动，不适用于 GPU Fleet
-#   - Graphics G4dn/G5/G6 Image Builder 制作的镜像包含 GPU 驱动，可用于任意类型 Fleet（包括 Standard）
+#   - 镜像须与 Fleet 实例系列匹配（G4dn 镜像→G4dn Fleet，G5 镜像→G5 Fleet）
+#   - GPU 镜像可用于 Standard Fleet（GPU 驱动被忽略，不影响普通软件运行）
+#   - 不同 GPU 系列之间驱动不兼容，不可混用（如 G4dn 镜像不能用于 G5 Fleet）
+#   - Standard/Compute/Memory 镜像不含 GPU 驱动，不适用于任何 GPU Fleet
 #
 # 使用示例（多 Fleet 场景）：
 #   CFN 已创建 G4dn Image Builder（GPU 软件用）

@@ -75,7 +75,7 @@ fleet-stack-deploy.sh（可多次执行，支持多 Fleet）
 - CFN 只管基础设施，Fleet/Stack 通过脚本创建，支持灵活组合
 - 多个 Fleet 共用同一套 VPC/网络资源，通过 `fleet-suffix` 区分
 - 每个 Fleet 可独立设置实例类型、镜像、Fleet 类型
-- **镜像兼容性**：Standard/Compute/Memory Image Builder 制作的镜像不含 GPU 驱动，不适用于 GPU Fleet；G4dn/G5/G6 Image Builder 制作的镜像含 GPU 驱动，**可用于任意类型 Fleet**（包括 Standard）
+- **镜像兼容性**：镜像必须与 Fleet 实例系列匹配（G4dn 镜像用于 G4dn Fleet，G5 镜像用于 G5 Fleet）。GPU 镜像可用于 Standard Fleet（GPU 驱动被忽略），但**不同 GPU 系列之间不可混用**（驱动不兼容）
 
 ---
 
@@ -164,7 +164,7 @@ bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 ai-studio  # GPU 
 bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 mendix     # Standard Image Builder → Mendix
 ```
 
-> **镜像兼容性**：Standard Image Builder 制作的镜像不含 GPU 驱动，不适用于 GPU Fleet。G4dn Image Builder 制作的镜像含 GPU 驱动，可用于任意类型 Fleet（包括 Standard Fleet）。
+> **镜像兼容性**：镜像须与 Fleet 实例系列匹配（G4dn↔G4dn，G5↔G5）。GPU 镜像可用于 Standard Fleet（GPU 驱动被忽略），但不同 GPU 系列之间驱动不兼容，不可混用。
 
 登录 Image Builder Windows 桌面后：
 1. 安装所需软件
