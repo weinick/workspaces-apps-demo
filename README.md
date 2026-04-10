@@ -90,6 +90,9 @@ BUCKET=$(aws cloudformation describe-stacks \
 aws s3 cp <installer.exe> s3://$BUCKET/installers/ --region <region>
 ```
 
+> ⚠️  **必须上传到 `installers/` 子目录**，不能直接放在 Bucket 根目录。
+> `imagebuilder-setup.sh` 会自动检测根目录文件并提示移动，也可提前手动放到正确路径。
+
 ---
 
 ### Step 3：制作自定义镜像

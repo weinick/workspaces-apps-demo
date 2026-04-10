@@ -39,12 +39,34 @@ echo "=== 检查 S3 安装包 ==="
 INSTALLERS=$(aws s3 ls "s3://$BUCKET/installers/" --region "$REGION" 2>/dev/null || true)
 
 if [[ -z "$INSTALLERS" ]]; then
-  echo "❌ S3 中没有找到安装包！"
+  echo "⚠️  s3://$BUCKET/installers/ 中没有找到安装包"
   echo ""
-  echo "请先将软件安装包上传到 S3："
-  echo "  aws s3 cp <installer.exe> s3://$BUCKET/installers/ --region $REGION"
-  echo ""
-  exit 1
+
+  # 自动检测：文件是否被上传到根目录
+  ROOT_FILES=$(aws s3 ls "s3://$BUCKET/" --region "$REGION" 2>/dev/null | grep -v 'PRE ' || true)
+  if [[ -n "$ROOT_FILES" ]]; then
+    echo "💡 检测到文件上传在 Bucket 根目录，正在自动移动到 installers/ 子目录..."
+    echo ""
+    while IFS= read -r line; do
+      FNAME=$(echo "$line" | awk '{print $4}')
+      if [[ -z "$FNAME" ]]; then continue; fi
+      echo "   移动: $FNAME → installers/$FNAME"
+      aws s3 mv "s3://$BUCKET/$FNAME" "s3://$BUCKET/installers/$FNAME" --region "$REGION" > /dev/null
+    done <<< "$ROOT_FILES"
+    echo ""
+    echo "✅ 移动完成，重新检查安装包..."
+    INSTALLERS=$(aws s3 ls "s3://$BUCKET/installers/" --region "$REGION" 2>/dev/null || true)
+  fi
+
+  if [[ -z "$INSTALLERS" ]]; then
+    echo "❌ S3 中没有找到安装包，请先上传到正确路径："
+    echo ""
+    echo "  aws s3 cp <installer.exe> s3://$BUCKET/installers/ --region $REGION"
+    echo ""
+    echo "  ⚠️  注意：必须上传到 installers/ 子目录，不能直接放在 Bucket 根目录"
+    echo ""
+    exit 1
+  fi
 fi
 
 echo "找到以下安装包："
