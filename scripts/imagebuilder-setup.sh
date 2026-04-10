@@ -158,7 +158,14 @@ if [[ "$STATE" == "NOT_FOUND" || "$STATE" == "None" ]]; then
   exit 1
 fi
 
-if [[ "$STATE" == "STOPPED" ]]; then
+if [[ "$STATE" == "SNAPSHOTTING" ]]; then
+  echo "⚠️  Image Builder 正在打包镜像（SNAPSHOTTING），请等待镜像制作完成后再运行此脚本。"
+  echo "   镜像打包约需 20-30 分钟，完成后 Image Builder 会自动变为 STOPPED。"
+  echo ""
+  echo "   查看状态："
+  echo "   aws appstream describe-image-builders --names $BUILDER_NAME --region $REGION --query 'ImageBuilders[0].State' --output text"
+  exit 0
+elif [[ "$STATE" == "STOPPED" ]]; then
   echo "Image Builder 处于 STOPPED 状态，正在启动..."
   aws appstream start-image-builder \
     --name "$BUILDER_NAME" \
@@ -168,7 +175,7 @@ elif [[ "$STATE" != "RUNNING" ]]; then
   echo "等待 Image Builder RUNNING（当前: $STATE）..."
 fi
 
-if [[ "$STATE" != "RUNNING" ]]; then
+if [[ "$STATE" != "RUNNING" && "$STATE" != "SNAPSHOTTING" ]]; then
   while true; do
     sleep 30
     STATE=$(aws appstream describe-image-builders \
