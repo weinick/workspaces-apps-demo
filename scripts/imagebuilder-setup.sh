@@ -78,12 +78,17 @@ fi
 echo "找到以下安装包："
 echo "$INSTALLERS"
 echo ""
+if [[ -z "$INSTALLER_FILTER" ]]; then
+  echo "  💡 提示：可传入第 4 个参数按关键字过滤，只输出指定安装包的 URL"
+  echo "  例: bash scripts/imagebuilder-setup.sh $REGION $STACK_NAME $PRESIGN_EXPIRES <关键字>"
+  echo ""
+fi
 
 echo "=== 生成 Presigned URLs（有效期 ${PRESIGN_EXPIRES} 秒）==="
 echo ""
 
 if [[ -n "$INSTALLER_FILTER" ]]; then
-  echo "  🔍 安装包过滤关键字: \"$INSTALLER_FILTER\""
+  echo "  🔍 安装包过滤关键字: \"$INSTALLER_FILTER\" （大小写不敏感）"
   echo ""
 fi
 
@@ -94,9 +99,13 @@ while IFS= read -r line; do
   FILENAME=$(echo "$line" | awk '{print $4}')
   if [[ -z "$FILENAME" ]]; then continue; fi
 
-  # 如果设置了 filter，跳过不匹配的文件
-  if [[ -n "$INSTALLER_FILTER" && "$FILENAME" != *"$INSTALLER_FILTER"* ]]; then
-    continue
+  # 如果设置了 filter，跳过不匹配的文件（大小写不敏感）
+  if [[ -n "$INSTALLER_FILTER" ]]; then
+    FILENAME_LOWER=$(echo "$FILENAME" | tr '[:upper:]' '[:lower:]')
+    FILTER_LOWER=$(echo "$INSTALLER_FILTER" | tr '[:upper:]' '[:lower:]')
+    if [[ "$FILENAME_LOWER" != *"$FILTER_LOWER"* ]]; then
+      continue
+    fi
   fi
 
   MATCHED=$((MATCHED+1))
