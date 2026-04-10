@@ -6,20 +6,15 @@ Description: >
   支持实例类型: General Purpose / Compute / Memory / Graphics G4dn / G5 / G6
 
 Parameters:
-  EnvironmentName:
+  ResourcePrefix:
     Type: String
     Default: my-demo
-    Description: 环境名称前缀（用于所有资源命名，建议使用客户名或项目名）
+    Description: 资源命名前缀（用于所有资源命名，建议使用客户名或项目名，如 acme-prod）
 
   Region:
     Type: String
     Default: ap-southeast-1
     Description: 部署区域 (ap-southeast-1 新加坡 / ap-northeast-1 东京 / us-east-1 弗吉尼亚)
-
-  InstallerBucketName:
-    Type: String
-    Description: 存放软件安装包的 S3 Bucket 名称（会自动附加 Account ID 后缀避免冲突）
-    Default: my-demo-installers
 
   BaseImageName:
     Type: String
@@ -129,10 +124,7 @@ Metadata:
     ParameterGroups:
       - Label:
           default: 基础配置
-        Parameters: [EnvironmentName, Region]
-      - Label:
-          default: 软件安装包 (需提前上传到 S3)
-        Parameters: [InstallerBucketName]
+        Parameters: [ResourcePrefix, Region]
       - Label:
           default: AppStream Image Builder 配置
         Parameters: [BaseImageName, ImageBuilderInstanceType]
@@ -140,12 +132,10 @@ Metadata:
           default: 网络配置
         Parameters: [VpcCidr, PublicSubnet1Cidr, PublicSubnet2Cidr, PrivateSubnet1Cidr, PrivateSubnet2Cidr]
     ParameterLabels:
-      EnvironmentName:
-        default: "环境名称 (客户名/项目名，如 acme-demo)"
+      ResourcePrefix:
+        default: "资源命名前缀 (客户名/项目名，如 acme-demo)"
       ImageBuilderInstanceType:
         default: "Image Builder 实例类型 (与目标 Fleet 同系列)"
-      InstallerBucketName:
-        default: "S3 Bucket 名称 (自动添加 AccountId 后缀)"
 
 Resources:
 
@@ -160,14 +150,14 @@ Resources:
       EnableDnsSupport: true
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-vpc
+          Value: !Sub ${ResourcePrefix}-vpc
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-igw
+          Value: !Sub ${ResourcePrefix}-igw
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -184,7 +174,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-public-subnet-1
+          Value: !Sub ${ResourcePrefix}-public-subnet-1
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
@@ -195,7 +185,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-public-subnet-2
+          Value: !Sub ${ResourcePrefix}-public-subnet-2
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
@@ -205,7 +195,7 @@ Resources:
       CidrBlock: !Ref PrivateSubnet1Cidr
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-private-subnet-1
+          Value: !Sub ${ResourcePrefix}-private-subnet-1
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
@@ -215,7 +205,7 @@ Resources:
       CidrBlock: !Ref PrivateSubnet2Cidr
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-private-subnet-2
+          Value: !Sub ${ResourcePrefix}-private-subnet-2
 
   NatGatewayEIP:
     Type: AWS::EC2::EIP
@@ -224,7 +214,7 @@ Resources:
       Domain: vpc
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-nat-eip
+          Value: !Sub ${ResourcePrefix}-nat-eip
 
   NatGateway:
     Type: AWS::EC2::NatGateway
@@ -233,7 +223,7 @@ Resources:
       SubnetId: !Ref PublicSubnet1
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-nat
+          Value: !Sub ${ResourcePrefix}-nat
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
@@ -241,7 +231,7 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-public-rt
+          Value: !Sub ${ResourcePrefix}-public-rt
 
   DefaultPublicRoute:
     Type: AWS::EC2::Route
@@ -269,7 +259,7 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-private-rt
+          Value: !Sub ${ResourcePrefix}-private-rt
 
   DefaultPrivateRoute:
     Type: AWS::EC2::Route
@@ -296,7 +286,7 @@ Resources:
   ImageBuilderSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub ${EnvironmentName}-imagebuilder-sg
+      GroupName: !Sub ${ResourcePrefix}-imagebuilder-sg
       GroupDescription: Security group for AppStream Image Builder
       VpcId: !Ref VPC
       SecurityGroupEgress:
@@ -305,12 +295,12 @@ Resources:
           Description: Allow all outbound (for software download)
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-imagebuilder-sg
+          Value: !Sub ${ResourcePrefix}-imagebuilder-sg
 
   FleetSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub ${EnvironmentName}-fleet-sg
+      GroupName: !Sub ${ResourcePrefix}-fleet-sg
       GroupDescription: Security group for AppStream Fleet
       VpcId: !Ref VPC
       SecurityGroupEgress:
@@ -319,7 +309,7 @@ Resources:
           Description: Allow all outbound
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-fleet-sg
+          Value: !Sub ${ResourcePrefix}-fleet-sg
 
   # ============================================================
   # S3 Bucket (存放安装包，Image Builder 用)
@@ -327,7 +317,7 @@ Resources:
   InstallerBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub ${InstallerBucketName}-${AWS::AccountId}
+      BucketName: !Sub ${ResourcePrefix}-installers-${AWS::AccountId}
       VersioningConfiguration:
         Status: Enabled
       PublicAccessBlockConfiguration:
@@ -337,7 +327,7 @@ Resources:
         RestrictPublicBuckets: true
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-installers
+          Value: !Sub ${ResourcePrefix}-installers
 
   # ============================================================
   # IAM Role for Image Builder (访问 S3 安装包)
@@ -345,7 +335,7 @@ Resources:
   ImageBuilderRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${EnvironmentName}-imagebuilder-role
+      RoleName: !Sub ${ResourcePrefix}-imagebuilder-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -379,9 +369,9 @@ Resources:
       - PrivateSubnet1RouteTableAssociation
       - NatGateway
     Properties:
-      Name: !Sub ${EnvironmentName}-builder
-      DisplayName: !Sub ${EnvironmentName} Image Builder
-      Description: !Sub "Image Builder for ${EnvironmentName} (${ImageBuilderInstanceType})"
+      Name: !Sub ${ResourcePrefix}-builder
+      DisplayName: !Sub ${ResourcePrefix} Image Builder
+      Description: !Sub "Image Builder for ${ResourcePrefix} (${ImageBuilderInstanceType})"
       ImageName: !Ref BaseImageName
       InstanceType: !Ref ImageBuilderInstanceType
       VpcConfig:
@@ -393,9 +383,9 @@ Resources:
       EnableDefaultInternetAccess: false
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-imagebuilder
+          Value: !Sub ${ResourcePrefix}-imagebuilder
         - Key: Environment
-          Value: !Ref EnvironmentName
+          Value: !Ref ResourcePrefix
 
   # ============================================================
   # Fleet 和 Stack 在自定义镜像制作完成后通过脚本创建
@@ -408,40 +398,40 @@ Outputs:
     Description: VPC ID
     Value: !Ref VPC
     Export:
-      Name: !Sub ${EnvironmentName}-VpcId
+      Name: !Sub ${ResourcePrefix}-VpcId
 
   PrivateSubnet1Id:
     Description: Private Subnet 1 ID (Image Builder / Fleet 使用)
     Value: !Ref PrivateSubnet1
     Export:
-      Name: !Sub ${EnvironmentName}-PrivateSubnet1Id
+      Name: !Sub ${ResourcePrefix}-PrivateSubnet1Id
 
   PrivateSubnet2Id:
     Description: Private Subnet 2 ID
     Value: !Ref PrivateSubnet2
     Export:
-      Name: !Sub ${EnvironmentName}-PrivateSubnet2Id
+      Name: !Sub ${ResourcePrefix}-PrivateSubnet2Id
 
   ImageBuilderSecurityGroupId:
     Description: Image Builder Security Group ID
     Value: !Ref ImageBuilderSecurityGroup
     Export:
-      Name: !Sub ${EnvironmentName}-ImageBuilderSgId
+      Name: !Sub ${ResourcePrefix}-ImageBuilderSgId
 
   FleetSecurityGroupId:
     Description: Fleet Security Group ID (所有 Fleet 共用)
     Value: !Ref FleetSecurityGroup
     Export:
-      Name: !Sub ${EnvironmentName}-FleetSgId
+      Name: !Sub ${ResourcePrefix}-FleetSgId
 
   InstallerBucketName:
     Description: S3 Bucket for software installers
     Value: !Ref InstallerBucket
     Export:
-      Name: !Sub ${EnvironmentName}-InstallerBucket
+      Name: !Sub ${ResourcePrefix}-InstallerBucket
 
   ImageBuilderName:
     Description: AppStream Image Builder Name
     Value: !Ref AppStreamImageBuilder
     Export:
-      Name: !Sub ${EnvironmentName}-ImageBuilderName
+      Name: !Sub ${ResourcePrefix}-ImageBuilderName

@@ -102,8 +102,7 @@ aws cloudformation deploy \
   --region <region> \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
-    EnvironmentName=<env-name> \
-    InstallerBucketName=<bucket-name> \
+    ResourcePrefix=<prefix> \
     ImageBuilderInstanceType=stream.graphics.g4dn.xlarge \
     BaseImageName=AppStream-Graphics-G4dn-WinServer2022-11-10-2025
 ```
