@@ -3,12 +3,18 @@
 # 功能:
 #   1. 检查 S3 中的安装包并生成 Presigned URL（供 Image Builder 内下载使用）
 #   2. 等待 Image Builder RUNNING 后生成登录 URL
+#
+# 用法: imagebuilder-setup.sh <region> <stack-name> [presign-expires] [installer-filter]
+#   installer-filter: 可选，按文件名关键字过滤，只输出匹配的安装包 URL
+#                     例如传入 "ai-studio" 则只输出 Altair AI Studio 的 URL
+#                     如果不传则输出全部安装包
 
 set -euo pipefail
 
 REGION="${1:-ap-southeast-1}"
 STACK_NAME="${2:-siemens-demo}"
 PRESIGN_EXPIRES="${3:-3600}"  # Presigned URL 有效期（秒），默认1小时
+INSTALLER_FILTER="${4:-}"     # 可选：文件名关键字过滤
 
 echo "=============================="
 echo "WorkSpaces Applications Demo"
@@ -76,11 +82,24 @@ echo ""
 echo "=== 生成 Presigned URLs（有效期 ${PRESIGN_EXPIRES} 秒）==="
 echo ""
 
+if [[ -n "$INSTALLER_FILTER" ]]; then
+  echo "  🔍 安装包过滤关键字: \"$INSTALLER_FILTER\""
+  echo ""
+fi
+
 PRESIGN_CMDS=""
+MATCHED=0
 while IFS= read -r line; do
   # 提取文件名
   FILENAME=$(echo "$line" | awk '{print $4}')
   if [[ -z "$FILENAME" ]]; then continue; fi
+
+  # 如果设置了 filter，跳过不匹配的文件
+  if [[ -n "$INSTALLER_FILTER" && "$FILENAME" != *"$INSTALLER_FILTER"* ]]; then
+    continue
+  fi
+
+  MATCHED=$((MATCHED+1))
 
   S3_KEY="installers/$FILENAME"
   PRESIGNED_URL=$(aws s3 presign "s3://$BUCKET/$S3_KEY" \
@@ -99,6 +118,13 @@ while IFS= read -r line; do
 Invoke-WebRequest -Uri \"$PRESIGNED_URL\" -OutFile \"C:\\Users\\Administrator\\Downloads\\$SAFE_NAME\"
 "
 done <<< "$INSTALLERS"
+
+if [[ $MATCHED -eq 0 ]]; then
+  echo "❌ 没有找到匹配关键字 \"$INSTALLER_FILTER\" 的安装包"
+  echo "   S3 中现有文件："
+  aws s3 ls "s3://$BUCKET/installers/" --region "$REGION" | awk '{print "   - " $4}'
+  exit 1
+fi
 
 echo "=============================="
 echo "📋 Image Builder 内 PowerShell 下载命令（复制到 Image Builder 使用）："

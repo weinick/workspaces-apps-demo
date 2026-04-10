@@ -100,7 +100,11 @@ aws s3 cp <installer.exe> s3://$BUCKET/installers/ --region <region>
 #### 单一实例系列（只有一种 Fleet 类型）
 
 ```bash
-# 生成 CFN 创建的 Image Builder 登录 URL
+# 可选传入 installer-filter 只输出匹配的安装包 Presigned URL
+# 示例：只输出 Altair AI Studio 的 URL
+bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 ai-studio
+
+# 示例：输出所有安装包 URL（不传 filter）
 bash scripts/imagebuilder-setup.sh <region> <env-name>
 ```
 
