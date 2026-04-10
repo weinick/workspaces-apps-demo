@@ -250,7 +250,7 @@ bash scripts/fleet-stack-deploy.sh \
 |------|------|------|------|
 | `region` | ✅ | AWS 区域 | `ap-southeast-1` |
 | `cfn-stack-name` | ✅ | CFN Stack 名称，用于读取 VPC/SG 等网络配置 | `my-demo` |
-| `image-name` | ✅ | 自定义镜像名称（Image Assistant 制作完成后的名称） | `simens-altair` |
+| `image-name` | ✅ | 自定义镜像名称（Image Assistant 制作完成后的名称） | `my-demo-gpu-image-v1` |
 | `fleet-suffix` | ✅ | Fleet 标识后缀，自由命名，用于区分多个 Fleet | `gpu` / `mendix` |
 | `min-capacity` | 可选 | 最小实例数，默认 2 | `1` |
 | `max-capacity` | 可选 | Auto Scaling 上限，默认 20 | `10` |

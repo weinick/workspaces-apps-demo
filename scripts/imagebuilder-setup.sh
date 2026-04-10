@@ -6,7 +6,7 @@
 #
 # 用法: imagebuilder-setup.sh <region> <stack-name> [presign-expires] [installer-filter]
 #   installer-filter: 可选，按文件名关键字过滤，只输出匹配的安装包 URL
-#                     例如传入 "ai-studio" 则只输出 Altair AI Studio 的 URL
+#                     例如传入 "mendix" 则只输出文件名包含 "mendix" 的安装包 URL
 #                     如果不传则输出全部安装包
 
 set -euo pipefail
