@@ -326,8 +326,10 @@ bash scripts/create-imagebuilder.sh ap-southeast-1 my-demo mendix \
   stream.standard.xlarge <base-image-name>
 
 # Step 4: 分别为各 Image Builder 制作镜像（installer-filter 按安装包关键字过滤）
-bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 <gpu-software-keyword>     # GPU 镜像
-bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 <standard-software-keyword> # 非 GPU 镜像
+# GPU Image Builder（主，无需传 builder-suffix）
+bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 <gpu-software-keyword>
+# Standard Image Builder（副，需传入 builder-suffix 指定目标 Image Builder）
+bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 <standard-software-keyword> mendix
 
 # Step 5: 创建两个 Fleet（image-name 为 Image Assistant 制作时填写的镜像名）
 # Fleet 1：通用软件（无 GPU，成本低）
