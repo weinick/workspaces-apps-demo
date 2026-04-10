@@ -91,6 +91,29 @@ bash scripts/pre-deploy-check.sh ap-southeast-1 stream.graphics.g4dn.xlarge 20
 
 自动检查 Base Image 可用性、Service Quota、VPC/EIP 配额，并输出推荐的 CFN 部署命令。
 
+#### 查询可用的 ImageBuilderInstanceType 和 BaseImageName
+
+`pre-deploy-check.sh` 会自动列出目标 region 中该实例系列的所有可用 Base Image，并推荐最新版本。如需手动查询：
+
+```bash
+# 查询 Standard 系列可用 Base Image
+aws appstream describe-images --type PUBLIC --region <region> \
+  --query "Images[?contains(Name,'AppStream-WinServer') && State=='AVAILABLE'].Name" \
+  --output table
+
+# 查询 G4dn 系列可用 Base Image
+aws appstream describe-images --type PUBLIC --region <region> \
+  --query "Images[?contains(Name,'AppStream-Graphics-G4dn') && State=='AVAILABLE'].Name" \
+  --output table
+
+# 查询 G5 系列
+aws appstream describe-images --type PUBLIC --region <region> \
+  --query "Images[?contains(Name,'AppStream-Graphics-G5') && State=='AVAILABLE'].Name" \
+  --output table
+```
+
+`ImageBuilderInstanceType` 支持的实例类型参考 `fleet-stack-deploy.sh --help` 或 CFN 模板中的 `AllowedValues` 列表。
+
 ---
 
 ### Step 1：部署 CloudFormation（基础设施）
