@@ -134,8 +134,39 @@ bash scripts/imagebuilder-setup.sh <region> <env-name> standard  # Standard Imag
 aws appstream describe-images \
   --names <image-name> \
   --region <region> \
-  --query 'Images[0].State'
+  --query 'Images[0].State' \
+  --output text
 ```
+
+镜像状态说明：
+
+| 状态 | 含义 |
+|------|------|
+| `PENDING` | 排队等待制作 |
+| `SNAPSHOTTING` | 正在打包镜像（主要耗时阶段） |
+| `AVAILABLE` | ✅ 镜像制作完成，可以创建 Fleet |
+| `FAILED` | ❌ 制作失败，查看 Image Builder 日志排查 |
+
+**制作多个镜像（串行）：**
+
+一个 Image Builder 做完一个镜像后会自动关机，然后自动重启恢复到干净状态，可以继续制作下一个。等 Image Builder 回到 `RUNNING` 状态后重新运行脚本：
+
+```bash
+# 查看 Image Builder 状态
+aws appstream describe-image-builders \
+  --names <builder-name> \
+  --region <region> \
+  --query 'ImageBuilders[0].State' \
+  --output text
+
+# Image Builder RUNNING 后，生成下一个镜像的登录 URL
+bash scripts/imagebuilder-setup.sh <region> <env-name> 7200 <installer-filter>
+```
+
+> 💡 完成所有镜像制作后，立即删除 Image Builder 停止计费：
+> ```bash
+> bash scripts/delete-imagebuilder.sh <region> <env-name>
+> ```
 
 ---
 
