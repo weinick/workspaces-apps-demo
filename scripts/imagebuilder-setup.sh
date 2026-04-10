@@ -158,8 +158,17 @@ if [[ "$STATE" == "NOT_FOUND" || "$STATE" == "None" ]]; then
   exit 1
 fi
 
+if [[ "$STATE" == "STOPPED" ]]; then
+  echo "Image Builder 处于 STOPPED 状态，正在启动..."
+  aws appstream start-image-builder \
+    --name "$BUILDER_NAME" \
+    --region "$REGION" > /dev/null
+  echo "已触发启动，等待 RUNNING（约 5-10 分钟）..."
+elif [[ "$STATE" != "RUNNING" ]]; then
+  echo "等待 Image Builder RUNNING（当前: $STATE）..."
+fi
+
 if [[ "$STATE" != "RUNNING" ]]; then
-  echo "等待 Image Builder RUNNING（重启约需 5-10 分钟）..."
   while true; do
     sleep 30
     STATE=$(aws appstream describe-image-builders \
