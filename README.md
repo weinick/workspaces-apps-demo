@@ -142,17 +142,26 @@ bash scripts/imagebuilder-setup.sh <region> <env-name>
 
 #### 多实例系列（同时有 GPU 和非 GPU Fleet）
 
-CFN 只创建了一个 Image Builder（主，如 G4dn），需要用脚本额外创建非 GPU 的 Image Builder：
+CFN 只创建了一个 Image Builder（主，如 G4dn），需要用脚本额外创建其他类型的 Image Builder：
 
 ```bash
-# 创建额外的 Standard Image Builder（非 GPU 软件用）
-bash scripts/create-imagebuilder.sh <region> <env-name> standard \
-  stream.standard.xlarge \
-  AppStream-WinServer-WinServer2022-10-25-2024
+# 创建额外的 Image Builder
+# <builder-suffix> 自由命名，建议反映用途或实例系列，如 standard / mendix / training
+bash scripts/create-imagebuilder.sh <region> <stack-name> <builder-suffix> \
+  <instance-type> \
+  <base-image-name>
 
-# 生成各 Image Builder 的登录 URL
-bash scripts/imagebuilder-setup.sh <region> <env-name>          # GPU Image Builder
-bash scripts/imagebuilder-setup.sh <region> <env-name> standard  # Standard Image Builder
+# 示例：为 Mendix（非 GPU）创建一个 Standard Image Builder
+bash scripts/create-imagebuilder.sh ap-southeast-1 my-demo mendix \
+  stream.standard.xlarge \
+  AppStream-WinServer2025-12-18-2025
+
+# 生成各 Image Builder 的登录 URL（用 installer-filter 区分安装包）
+bash scripts/imagebuilder-setup.sh <region> <stack-name> 7200 <installer-filter>
+
+# 示例
+bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 ai-studio  # GPU Image Builder → Altair AI Studio
+bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 mendix     # Standard Image Builder → Mendix
 ```
 
 > **镜像兼容性**：Standard Image Builder 制作的镜像不含 GPU 驱动，不适用于 GPU Fleet。G4dn Image Builder 制作的镜像含 GPU 驱动，可用于任意类型 Fleet（包括 Standard Fleet）。
@@ -256,7 +265,7 @@ ENV_NAME=<env-name>-<fleet-suffix> bash scripts/scale-fleet.sh down
 
 ## 多 Fleet 场景示例（GPU + 非 GPU）
 
-同一客户有两类培训软件，一类不需要 GPU，一类需要 GPU：
+以下示例中，`<builder-suffix>` 和 `<fleet-suffix>` 均为自由命名，建议使用能反映用途的词（如 `gpu`、`mendix`、`training-a`）。
 
 ```bash
 # Step 1: 部署前检查（两种实例类型分别检查）
@@ -266,18 +275,18 @@ bash scripts/pre-deploy-check.sh ap-southeast-1 stream.standard.xlarge 30
 # Step 2: 部署 CFN（主 Image Builder 用 G4dn）
 aws cloudformation deploy ...
 
-# Step 3: 额外创建 Standard Image Builder
-bash scripts/create-imagebuilder.sh ap-southeast-1 my-demo standard \
-  stream.standard.xlarge AppStream-WinServer-WinServer2022-10-25-2024
+# Step 3: 额外创建 Image Builder（用于非 GPU 软件，builder-suffix 自定义）
+bash scripts/create-imagebuilder.sh ap-southeast-1 my-demo mendix \
+  stream.standard.xlarge AppStream-WinServer2025-12-18-2025
 
-# Step 4: 分别制作镜像
-bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo          # GPU 镜像
-bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo standard  # 非 GPU 镜像
+# Step 4: 分别制作镜像（installer-filter 按安装包关键字过滤）
+bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 ai-studio  # GPU 镜像（Altair AI Studio）
+bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 mendix     # 非 GPU 镜像（Mendix）
 
-# Step 5: 创建两个 Fleet
+# Step 5: 创建两个 Fleet（fleet-suffix 自定义，与镜像名对应即可）
 # Fleet 1：通用软件（无 GPU，成本低）
 bash scripts/fleet-stack-deploy.sh \
-  ap-southeast-1 my-demo standard-image-v1 standard \
+  ap-southeast-1 my-demo mendix-image-v1 mendix \
   2 30 stream.standard.xlarge
 
 # Fleet 2：AI/图形软件（GPU）
@@ -286,8 +295,8 @@ bash scripts/fleet-stack-deploy.sh \
   2 30 stream.graphics.g4dn.xlarge
 
 # 分别预热
-ENV_NAME=my-demo-standard bash scripts/scale-fleet.sh warmup 30
-ENV_NAME=my-demo-gpu      bash scripts/scale-fleet.sh warmup 20
+ENV_NAME=my-demo-mendix bash scripts/scale-fleet.sh warmup 30
+ENV_NAME=my-demo-gpu    bash scripts/scale-fleet.sh warmup 20
 
 # 分别生成 URL
 bash scripts/generate-urls.sh ap-southeast-1 my-demo-standard 30 3
