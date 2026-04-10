@@ -120,11 +120,11 @@ while IFS= read -r line; do
   echo "   $PRESIGNED_URL"
   echo ""
 
-  # 生成 PowerShell 下载命令
+  # 生成 PowerShell 下载命令（使用 $env:USERPROFILE 自动适配当前用户路径）
   SAFE_NAME=$(echo "$FILENAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
   PRESIGN_CMDS="${PRESIGN_CMDS}
 # 下载 $FILENAME
-Invoke-WebRequest -Uri \"$PRESIGNED_URL\" -OutFile \"C:\\Users\\Administrator\\Downloads\\$SAFE_NAME\"
+Invoke-WebRequest -Uri \"$PRESIGNED_URL\" -OutFile \"\$env:USERPROFILE\\Downloads\\$SAFE_NAME\"
 "
 done <<< "$INSTALLERS"
 
