@@ -4,10 +4,12 @@
 #   1. 检查 S3 中的安装包并生成 Presigned URL（供 Image Builder 内下载使用）
 #   2. 等待 Image Builder RUNNING 后生成登录 URL
 #
-# 用法: imagebuilder-setup.sh <region> <stack-name> [presign-expires] [installer-filter]
+# 用法: imagebuilder-setup.sh <region> <stack-name> [presign-expires] [installer-filter] [builder-suffix]
 #   installer-filter: 可选，按文件名关键字过滤，只输出匹配的安装包 URL
 #                     例如传入 "mendix" 则只输出文件名包含 "mendix" 的安装包 URL
 #                     如果不传则输出全部安装包
+#   builder-suffix:   可选，指定副 Image Builder 的 suffix（由 create-imagebuilder.sh 创建）
+#                     不传则默认使用主 Image Builder（从 CFN Stack 读取）
 
 set -euo pipefail
 
@@ -15,6 +17,7 @@ REGION="${1:-ap-southeast-1}"
 STACK_NAME="${2:-siemens-demo}"
 PRESIGN_EXPIRES="${3:-3600}"  # Presigned URL 有效期（秒），默认1小时
 INSTALLER_FILTER="${4:-}"     # 可选：文件名关键字过滤
+BUILDER_SUFFIX="${5:-}"       # 可选：副 Image Builder suffix（不传则用主 Image Builder）
 
 echo "=============================="
 echo "WorkSpaces Applications Demo"
@@ -36,8 +39,15 @@ BUILDER_NAME=$(aws cloudformation describe-stacks \
   --query 'Stacks[0].Outputs[?OutputKey==`ImageBuilderName`].OutputValue' \
   --output text)
 
-echo "S3 Bucket:     $BUCKET"
-echo "Image Builder: $BUILDER_NAME"
+# 如果传入了 builder-suffix，切换到副 Image Builder
+if [[ -n "$BUILDER_SUFFIX" ]]; then
+  BUILDER_NAME="${STACK_NAME}-${BUILDER_SUFFIX}-builder"
+  echo "S3 Bucket:     $BUCKET"
+  echo "Image Builder: $BUILDER_NAME（副，suffix=${BUILDER_SUFFIX}）"
+else
+  echo "S3 Bucket:     $BUCKET"
+  echo "Image Builder: $BUILDER_NAME（主）"
+fi
 echo ""
 
 # 列出 S3 中的安装包并生成 Presigned URL

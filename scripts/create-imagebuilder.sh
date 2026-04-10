@@ -7,7 +7,7 @@
 #
 # 注意：镜像和 Fleet 实例类型的匹配关系：
 #   - 镜像须与 Fleet 实例系列匹配（G4dn 镜像→G4dn Fleet，G5 镜像→G5 Fleet）
-#   - GPU 镜像可用于 Standard Fleet（GPU 驱动被忽略，不影响普通软件运行）
+#   - GPU 系列镜像（G4dn/G5/G6）不能用于 Standard/Compute/Memory Fleet，AppStream API 会拒绝该组合
 #   - 不同 GPU 系列之间驱动不兼容，不可混用（如 G4dn 镜像不能用于 G5 Fleet）
 #   - Standard/Compute/Memory 镜像不含 GPU 驱动，不适用于任何 GPU Fleet
 #

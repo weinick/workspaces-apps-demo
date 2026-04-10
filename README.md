@@ -75,7 +75,7 @@ fleet-stack-deploy.sh（可多次执行，支持多 Fleet）
 - CFN 只管基础设施，Fleet/Stack 通过脚本创建，支持灵活组合
 - 多个 Fleet 共用同一套 VPC/网络资源，通过 `fleet-suffix` 区分
 - 每个 Fleet 可独立设置实例类型、镜像、Fleet 类型
-- **镜像兼容性**：镜像必须与 Fleet 实例系列匹配（G4dn 镜像用于 G4dn Fleet，G5 镜像用于 G5 Fleet）。GPU 镜像可用于 Standard Fleet（GPU 驱动被忽略），但**不同 GPU 系列之间不可混用**（驱动不兼容）
+- **镜像兼容性**：镜像必须与 Fleet 实例系列严格匹配。GPU 系列镜像（G4dn/G5/G6）**只能**用于对应 GPU 系列的 Fleet，不能用于 Standard/Compute/Memory Fleet，也不能跨 GPU 系列混用
 
 ---
 
@@ -164,26 +164,28 @@ bash scripts/imagebuilder-setup.sh <region> <stack-name> <presign-ttl-seconds> <
 
 #### 多实例系列（同时有 GPU 和非 GPU Fleet）
 
-CFN 只创建了一个 Image Builder（主，如 G4dn），需要用脚本额外创建其他类型的 Image Builder：
+> ⚠️ **关键约束**：镜像必须由对应系列的 Image Builder 制作，不可跨系列。
+> - GPU 软件（如 AI Studio）→ 必须用 **G4dn/G5/G6 Image Builder** 制作
+> - 非 GPU 软件（如 Mendix）→ 必须用 **Standard Image Builder** 制作
+>
+> CFN 默认只创建一个 Image Builder（主），如需制作不同系列的镜像，必须先用 `create-imagebuilder.sh` 创建对应系列的 Image Builder。
 
 ```bash
-# 创建额外的 Image Builder
-# <builder-suffix> 自由命名，建议反映用途或实例系列，如 standard / mendix / training
-bash scripts/create-imagebuilder.sh <region> <stack-name> <builder-suffix> \
-  <instance-type> \
-  <base-image-name>
+# Step 1: CFN 已创建主 Image Builder（如 G4dn），先制作 GPU 镜像
+bash scripts/imagebuilder-setup.sh <region> <stack-name> <presign-ttl-seconds> <gpu-installer-filter>
 
-# 示例：为第二款软件创建一个 Standard Image Builder
+# Step 2: 额外创建 Standard Image Builder，用于制作非 GPU 镜像
+# <builder-suffix> 自由命名，建议反映用途，如 standard / mendix
 bash scripts/create-imagebuilder.sh <region> <stack-name> <builder-suffix> \
-  <instance-type> \
-  <base-image-name>
+  <standard-instance-type> \
+  <standard-base-image-name>
 
-# 分别为各 Image Builder 生成登录 URL（用 installer-filter 只显示对应安装包）
-bash scripts/imagebuilder-setup.sh <region> <stack-name> <presign-ttl-seconds> <installer-filter-1>  # Image Builder 1
-bash scripts/imagebuilder-setup.sh <region> <stack-name> <presign-ttl-seconds> <installer-filter-2>  # Image Builder 2
+# Step 3: 用 Standard Image Builder 制作非 GPU 镜像
+# imagebuilder-setup.sh 默认连接主 Image Builder，需额外指定 builder-suffix
+bash scripts/imagebuilder-setup.sh <region> <stack-name> <presign-ttl-seconds> <standard-installer-filter> <builder-suffix>
 ```
 
-> **镜像兼容性**：镜像须与 Fleet 实例系列匹配（G4dn↔G4dn，G5↔G5）。GPU 镜像可用于 Standard Fleet（GPU 驱动被忽略），但不同 GPU 系列之间驱动不兼容，不可混用。
+> **镜像兼容性**：镜像必须与 Fleet 实例系列严格匹配（G4dn 镜像→G4dn Fleet，Standard 镜像→Standard Fleet）。GPU 系列镜像**不能**用于 Standard/Compute/Memory Fleet，AppStream API 会直接拒绝该组合。
 
 登录 Image Builder Windows 桌面后：
 1. 安装所需软件
