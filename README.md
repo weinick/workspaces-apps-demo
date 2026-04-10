@@ -152,7 +152,7 @@ aws s3 cp <installer.exe> s3://$BUCKET/installers/ --region <region>
 
 ### Step 3：制作自定义镜像
 
-#### 单一实例系列（只有一种 Fleet 类型）
+#### 基本用法
 
 ```bash
 # 基本用法（输出所有安装包的 Presigned URL）
@@ -162,7 +162,7 @@ bash scripts/imagebuilder-setup.sh <region> <stack-name>
 bash scripts/imagebuilder-setup.sh <region> <stack-name> <presign-ttl-seconds> <installer-filter>
 ```
 
-#### 多实例系列（同时有 GPU 和非 GPU Fleet）
+#### ▶ 多 Fleet 扩展：多实例系列（GPU + 非 GPU）
 
 > ⚠️ **关键约束**：镜像必须由对应系列的 Image Builder 制作，不可跨系列。
 > - GPU 软件（如 AI Studio）→ 必须用 **G4dn/G5/G6 Image Builder** 制作
@@ -278,6 +278,24 @@ bash scripts/fleet-stack-deploy.sh \
 | `ALWAYS_ON` | 实例持续运行，无论是否有用户均按全价计费 | 即时 | 企业生产环境、要求零等待 |
 | `ELASTIC` | 仅 streaming 会话期间计费（按秒，最低 15 分钟），需使用 App Block | 较长（含下载） | 低频使用、轻量应用 |
 
+#### ▶ 多 Fleet 扩展：为每个镜像分别创建 Fleet
+
+`fleet-stack-deploy.sh` 可多次执行，每次创建一个独立的 Fleet + Stack，通过 `fleet-suffix` 区分：
+
+```bash
+# Fleet 1：非 GPU（Standard 镜像 → Standard Fleet）
+bash scripts/fleet-stack-deploy.sh \
+  <region> <stack-name> <standard-image-name> <suffix-1> \
+  <min> <max> stream.standard.xlarge ON_DEMAND
+
+# Fleet 2：GPU（G4dn 镜像 → G4dn Fleet）
+bash scripts/fleet-stack-deploy.sh \
+  <region> <stack-name> <gpu-image-name> <suffix-2> \
+  <min> <max> stream.graphics.g4dn.xlarge ON_DEMAND
+```
+
+> ⚠️ 镜像与 Fleet 实例系列必须严格匹配，AppStream API 会拒绝不匹配的组合（如 G4dn 镜像不能用于 Standard Fleet）。
+
 ---
 
 ### Step 5：预热实例（培训前）
@@ -290,6 +308,8 @@ ENV_NAME=<env-name>-<fleet-suffix> bash scripts/scale-fleet.sh warmup <count>
 ENV_NAME=<env-name>-<fleet-suffix> bash scripts/scale-fleet.sh status
 ```
 
+> 多 Fleet 场景：对每个 Fleet 分别执行，`fleet-suffix` 对应各自的后缀。
+
 ---
 
 ### Step 6：生成 Streaming URL
@@ -297,6 +317,8 @@ ENV_NAME=<env-name>-<fleet-suffix> bash scripts/scale-fleet.sh status
 ```bash
 bash scripts/generate-urls.sh <region> <env-name>-<fleet-suffix> <user-count> <validity-hours>
 ```
+
+> 多 Fleet 场景：对每个 Fleet 分别执行，每个 Fleet 生成对应的 URL 列表。
 
 ---
 
@@ -306,54 +328,7 @@ bash scripts/generate-urls.sh <region> <env-name>-<fleet-suffix> <user-count> <v
 ENV_NAME=<env-name>-<fleet-suffix> bash scripts/scale-fleet.sh down
 ```
 
----
-
-## 多 Fleet 场景示例（GPU + 非 GPU）
-
-以下示例中，`<builder-suffix>` 和 `<fleet-suffix>` 均为自由命名，建议使用能反映用途的词（如 `gpu`、`mendix`、`training-a`）。
-
-```bash
-# Step 1: 部署前检查（两种实例类型分别检查）
-bash scripts/pre-deploy-check.sh ap-southeast-1 stream.graphics.g4dn.xlarge 20
-bash scripts/pre-deploy-check.sh ap-southeast-1 stream.standard.xlarge 30
-
-# Step 2: 部署 CFN（主 Image Builder 用 G4dn）
-aws cloudformation deploy ...
-
-# Step 3: 额外创建 Image Builder（用于非 GPU 软件，builder-suffix 自定义）
-# 可用 Base Image 通过 pre-deploy-check.sh 查询（见 Step 0）
-bash scripts/create-imagebuilder.sh ap-southeast-1 my-demo mendix \
-  stream.standard.xlarge <base-image-name>
-
-# Step 4: 分别为各 Image Builder 制作镜像（installer-filter 按安装包关键字过滤）
-# GPU Image Builder（主，无需传 builder-suffix）
-bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 <gpu-software-keyword>
-# Standard Image Builder（副，需传入 builder-suffix 指定目标 Image Builder）
-bash scripts/imagebuilder-setup.sh ap-southeast-1 my-demo 7200 <standard-software-keyword> mendix
-
-# Step 5: 创建两个 Fleet（image-name 为 Image Assistant 制作时填写的镜像名）
-# Fleet 1：通用软件（无 GPU，成本低）
-bash scripts/fleet-stack-deploy.sh \
-  ap-southeast-1 my-demo <mendix-image-name> mendix \
-  2 30 stream.standard.xlarge
-
-# Fleet 2：AI/图形软件（GPU）
-bash scripts/fleet-stack-deploy.sh \
-  ap-southeast-1 my-demo <gpu-image-name> gpu \
-  2 30 stream.graphics.g4dn.xlarge
-
-# 分别预热
-ENV_NAME=my-demo-mendix bash scripts/scale-fleet.sh warmup 30
-ENV_NAME=my-demo-gpu    bash scripts/scale-fleet.sh warmup 20
-
-# 分别生成 URL
-bash scripts/generate-urls.sh ap-southeast-1 my-demo-mendix 30 3
-bash scripts/generate-urls.sh ap-southeast-1 my-demo-gpu    20 3
-
-# 分别归零
-ENV_NAME=my-demo-mendix bash scripts/scale-fleet.sh down
-ENV_NAME=my-demo-gpu    bash scripts/scale-fleet.sh down
-```
+> 多 Fleet 场景：对每个 Fleet 分别执行归零。
 
 ---
 
