@@ -75,7 +75,7 @@ fleet-stack-deploy.sh（可多次执行，支持多 Fleet）
 - CFN 只管基础设施，Fleet/Stack 通过脚本创建，支持灵活组合
 - 多个 Fleet 共用同一套 VPC/网络资源，通过 `fleet-suffix` 区分
 - 每个 Fleet 可独立设置实例类型、镜像、Fleet 类型
-- **不同实例系列的镜像不能混用**：G4dn/G5/G6 镜像只能用于同系列 GPU Fleet；Standard/Compute/Memory 镜像用于非 GPU Fleet
+- **镜像兼容性**：Standard/Compute/Memory Image Builder 制作的镜像不含 GPU 驱动，不适用于 GPU Fleet；G4dn/G5/G6 Image Builder 制作的镜像含 GPU 驱动，**可用于任意类型 Fleet**（包括 Standard）
 
 ---
 
@@ -155,7 +155,7 @@ bash scripts/imagebuilder-setup.sh <region> <env-name>          # GPU Image Buil
 bash scripts/imagebuilder-setup.sh <region> <env-name> standard  # Standard Image Builder
 ```
 
-> **镜像系列限制**：不同实例系列的镜像不可混用。G4dn Image Builder 制作的镜像只能用于 G4dn Fleet；Standard Image Builder 制作的镜像只能用于 Standard/Compute/Memory Fleet。
+> **镜像兼容性**：Standard Image Builder 制作的镜像不含 GPU 驱动，不适用于 GPU Fleet。G4dn Image Builder 制作的镜像含 GPU 驱动，可用于任意类型 Fleet（包括 Standard Fleet）。
 
 登录 Image Builder Windows 桌面后：
 1. 安装所需软件
