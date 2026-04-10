@@ -4,6 +4,39 @@ AWS WorkSpaces Applications (AppStream 2.0) 的一键部署工具，支持多 Fl
 
 ---
 
+## 前置条件
+
+### 1. 安装 AWS CLI v2
+
+| 平台 | 安装方式 |
+|------|----------|
+| macOS | [官方文档](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions) 或 `brew install awscli` |
+| Linux | [官方文档](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions) |
+| Windows | [官方文档](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions) 或 `winget install Amazon.AWSCLI` |
+
+验证安装：
+```bash
+aws --version
+# 输出示例: aws-cli/2.x.x Python/3.x.x ...
+```
+
+### 2. 配置 AWS 凭证
+
+```bash
+aws configure
+# 填入：
+#   AWS Access Key ID
+#   AWS Secret Access Key
+#   Default region（如 ap-southeast-1）
+#   Default output format（建议 json）
+```
+
+> 💡 如果在 EC2 上运行，绑定了 IAM Role 则无需 `aws configure`，直接使用即可。
+>
+> 所需最小权限：`appstream:*`、`cloudformation:*`、`s3:*`、`ec2:Describe*`、`iam:*`（用于 CFN 创建 IAM Role）
+
+---
+
 ## 文件结构
 
 ```
