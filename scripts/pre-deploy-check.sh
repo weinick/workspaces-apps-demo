@@ -61,10 +61,12 @@ else
   exit 1
 fi
 
-# 检查 AppStream 基础权限
-aws appstream describe-fleets --region "$REGION" --max-results 1 > /dev/null 2>&1 && \
-  pass "AppStream 读取权限正常" || \
+# 检查 AppStream 基础权限（describe-fleets 不支持 --max-results，直接调用）
+if aws appstream describe-fleets --region "$REGION" > /dev/null 2>&1; then
+  pass "AppStream 读取权限正常"
+else
   fail "缺少 AppStream 权限 (appstream:DescribeFleets)"
+fi
 
 # 检查 CloudFormation 权限
 aws cloudformation list-stacks --region "$REGION" --max-items 1 > /dev/null 2>&1 && \
