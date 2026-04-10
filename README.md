@@ -239,14 +239,38 @@ bash scripts/imagebuilder-setup.sh <region> <env-name> 7200 <installer-filter>
 ```bash
 bash scripts/fleet-stack-deploy.sh \
   <region> \
-  <env-name> \
+  <cfn-stack-name> \
   <image-name> \
   <fleet-suffix> \
   <min-capacity> \
   <max-capacity> \
   <instance-type> \
-  <fleet-type>
+  [fleet-type]
 ```
+
+**参数说明：**
+
+| 参数 | 必填 | 说明 | 示例 |
+|------|------|------|------|
+| `region` | ✅ | AWS 区域 | `ap-southeast-1` |
+| `cfn-stack-name` | ✅ | CFN Stack 名称，用于读取 VPC/SG 等网络配置 | `my-demo` |
+| `image-name` | ✅ | 自定义镜像名称（Image Assistant 制作完成后的名称） | `simens-altair` |
+| `fleet-suffix` | ✅ | Fleet 标识后缀，自由命名，用于区分多个 Fleet | `gpu` / `mendix` |
+| `min-capacity` | 可选 | 最小实例数，默认 2 | `1` |
+| `max-capacity` | 可选 | Auto Scaling 上限，默认 20 | `10` |
+| `instance-type` | ✅ | 实例类型，须与镜像系列匹配 | `stream.graphics.g4dn.xlarge` |
+| `fleet-type` | 可选 | Fleet 类型，默认 ON_DEMAND | `ON_DEMAND` |
+
+**实例类型参考：**
+
+| 系列 | 实例类型 | 适用场景 |
+|------|---------|---------|
+| 通用 | `stream.standard.medium/large/xlarge/2xlarge` | 办公、浏览器、轻量应用 |
+| 计算优化 | `stream.compute.large/.../8xlarge` | 高 CPU 计算 |
+| 内存优化 | `stream.memory.large/.../8xlarge` | 大内存数据集 |
+| GPU G4dn | `stream.graphics.g4dn.xlarge/.../16xlarge` (NVIDIA T4) | AI 推理、图形软件 |
+| GPU G5 | `stream.graphics.g5.xlarge/.../48xlarge` (NVIDIA A10G) | 高端图形、视频渲染 |
+| GPU G6 | `stream.graphics.g6.xlarge/.../48xlarge` (NVIDIA L4) | 新一代 GPU，性价比高 |
 
 **Fleet 类型说明：**
 
