@@ -85,8 +85,8 @@ echo ""
 
 # 交互式询问操作系统
 echo "  您的应用需要哪种操作系统？"
-echo "    1) Windows (Windows Server 2019/2022)"
-echo "    2) Linux   (Amazon Linux 2 / Rocky Linux 8)"
+echo "    1) Windows"
+echo "    2) Linux"
 echo ""
 read -r -p "  请选择 [1/2] (默认 1): " OS_CHOICE
 OS_CHOICE=${OS_CHOICE:-1}
@@ -96,17 +96,6 @@ case "$OS_CHOICE" in
     OS_TYPE="Linux"
     echo ""
     echo "  已选择: Linux"
-    echo ""
-    echo "  Linux 发行版选择："
-    echo "    a) Amazon Linux 2  (AWS 原生，长期支持)"
-    echo "    b) Rocky Linux 8   (RHEL 兼容，社区维护)"
-    echo ""
-    read -r -p "  请选择 [a/b] (默认 b): " LINUX_DISTRO
-    LINUX_DISTRO=${LINUX_DISTRO:-b}
-    case "$LINUX_DISTRO" in
-      a|A) LINUX_FILTER="AmazonLinux2" ; LINUX_LABEL="Amazon Linux 2" ;;
-      *)   LINUX_FILTER="RockyLinux8"  ; LINUX_LABEL="Rocky Linux 8"  ;;
-    esac
     ;;
   *)
     OS_TYPE="Windows"
@@ -119,29 +108,45 @@ if [[ "$IMAGE_FAMILY" == "Unknown" ]]; then
   warn "无法识别实例类型系列，请手动查询 Base Image"
 else
   # 根据实例系列和操作系统构建查询条件
+  # Linux: 同时查询 RockyLinux8 和 AmazonLinux2，自动选最新
+  # Windows: 查询 WinServer 系列
   if [[ "$OS_TYPE" == "Linux" ]]; then
     if [[ "$IMAGE_FAMILY" == "Standard" || "$IMAGE_FAMILY" == "Compute" || "$IMAGE_FAMILY" == "Memory" ]]; then
-      QUERY_FILTER="AppStream-${LINUX_FILTER}"
+      QUERY_FILTER="AppStream-"
+      QUERY_EXCLUDE="WinServer"
     else
-      QUERY_FILTER="AppStream-Graphics-${IMAGE_FAMILY}-${LINUX_FILTER}"
+      QUERY_FILTER="AppStream-Graphics-${IMAGE_FAMILY}-"
+      QUERY_EXCLUDE="WinServer"
     fi
-    OS_LABEL="$LINUX_LABEL"
+    OS_LABEL="Linux"
   else
     if [[ "$IMAGE_FAMILY" == "Standard" || "$IMAGE_FAMILY" == "Compute" || "$IMAGE_FAMILY" == "Memory" ]]; then
       QUERY_FILTER="AppStream-WinServer"
+      QUERY_EXCLUDE=""
     else
       QUERY_FILTER="AppStream-Graphics-${IMAGE_FAMILY}-WinServer"
+      QUERY_EXCLUDE=""
     fi
     OS_LABEL="Windows"
   fi
 
   echo ""
   echo "  查询 ${IMAGE_FAMILY} 系列 Base Image（${OS_LABEL}）..."
-  IMAGES=$(aws appstream describe-images \
-    --type PUBLIC \
-    --region "$REGION" \
-    --query "Images[?contains(Name, '${QUERY_FILTER}') && State=='AVAILABLE'].{Name:Name,CreatedTime:CreatedTime}" \
-    --output json 2>/dev/null || echo "[]")
+
+  if [[ "$OS_TYPE" == "Linux" ]]; then
+    # Linux: 查询所有非 Windows 的 Base Image（包含 RockyLinux8 和 AmazonLinux2），取最新
+    IMAGES=$(aws appstream describe-images \
+      --type PUBLIC \
+      --region "$REGION" \
+      --query "Images[?contains(Name, '${QUERY_FILTER}') && !contains(Name, 'WinServer') && State=='AVAILABLE'].{Name:Name,CreatedTime:CreatedTime}" \
+      --output json 2>/dev/null || echo "[]")
+  else
+    IMAGES=$(aws appstream describe-images \
+      --type PUBLIC \
+      --region "$REGION" \
+      --query "Images[?contains(Name, '${QUERY_FILTER}') && State=='AVAILABLE'].{Name:Name,CreatedTime:CreatedTime}" \
+      --output json 2>/dev/null || echo "[]")
+  fi
 
   IMAGE_COUNT=$(echo "$IMAGES" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
 
