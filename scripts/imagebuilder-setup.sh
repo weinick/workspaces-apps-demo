@@ -251,12 +251,29 @@ aws appstream describe-images \
   --query 'Images[*].{Name:Name,State:State,Created:CreatedTime}' \
   --output table 2>/dev/null || echo "  （查询失败，请手动确认）"
 
+# 获取最新的自定义镜像名（按创建时间倒序）
+LATEST_IMAGE=$(aws appstream describe-images \
+  --type PRIVATE --region "$REGION" \
+  --query 'sort_by(Images, &CreatedTime)[-1].Name' \
+  --output text 2>/dev/null || echo "")
+
 echo ""
 header "🎉 下一步"
 echo ""
 echo "  1. 删除 Image Builder（停止计费）："
+echo ""
 echo "     bash scripts/delete-imagebuilder.sh $REGION $STACK_NAME"
 echo ""
-echo "  2. 部署 Fleet："
-echo "     bash scripts/fleet-stack-deploy.sh $REGION $STACK_NAME <image-name> <fleet-suffix> <min> <max> <instance-type>"
+echo "  2. 部署 Fleet（region/stack-name/image 已预填，按需修改其余参数）："
+echo ""
+if [[ -n "$LATEST_IMAGE" && "$LATEST_IMAGE" != "None" ]]; then
+  echo "     bash scripts/fleet-stack-deploy.sh $REGION $STACK_NAME $LATEST_IMAGE <fleet-suffix> 1 2 <instance-type>"
+else
+  echo "     bash scripts/fleet-stack-deploy.sh $REGION $STACK_NAME <image-name> <fleet-suffix> 1 2 <instance-type>"
+fi
+echo ""
+echo "     参数说明："
+echo "       fleet-suffix:   Fleet 名称后缀（如 gpu、standard）"
+echo "       1 2:            最小/最大实例数（按需调整）"
+echo "       instance-type:  实例类型（如 stream.graphics.g4dn.xlarge）"
 echo ""
