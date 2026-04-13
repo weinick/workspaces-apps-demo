@@ -31,13 +31,25 @@ BUCKET=$(aws cloudformation describe-stacks \
   --stack-name "$STACK_NAME" \
   --region "$REGION" \
   --query 'Stacks[0].Outputs[?OutputKey==`InstallerBucketName`].OutputValue' \
-  --output text)
+  --output text 2>/dev/null || true)
 
 BUILDER_NAME=$(aws cloudformation describe-stacks \
   --stack-name "$STACK_NAME" \
   --region "$REGION" \
   --query 'Stacks[0].Outputs[?OutputKey==`ImageBuilderName`].OutputValue' \
-  --output text)
+  --output text 2>/dev/null || true)
+
+if [[ -z "$BUCKET" || "$BUCKET" == "None" ]]; then
+  echo "❌ 无法从 CloudFormation Stack '$STACK_NAME' 获取 S3 Bucket 信息"
+  echo "   请确认 Stack 名称正确且已部署完成"
+  exit 1
+fi
+
+if [[ -z "$BUILDER_NAME" || "$BUILDER_NAME" == "None" ]]; then
+  echo "❌ 无法从 CloudFormation Stack '$STACK_NAME' 获取 Image Builder 名称"
+  echo "   请确认 Stack 名称正确且已部署完成"
+  exit 1
+fi
 
 # 如果传入了 builder-suffix，切换到副 Image Builder
 if [[ -n "$BUILDER_SUFFIX" ]]; then
