@@ -62,6 +62,18 @@ else
 fi
 echo ""
 
+# 提醒用户上传安装包
+echo "=== 上传安装包 ==="
+echo "请确保已将软件安装包上传到 S3（如尚未上传，按 Ctrl+C 中断后执行以下命令）："
+echo ""
+echo "  aws s3 cp <installer-file> s3://$BUCKET/installers/ --region $REGION"
+echo ""
+echo "  示例：aws s3 cp MyApp-Setup.exe s3://$BUCKET/installers/ --region $REGION"
+echo "  批量：aws s3 cp ./installers/ s3://$BUCKET/installers/ --region $REGION --recursive"
+echo ""
+read -r -p "已上传安装包？按 Enter 继续，Ctrl+C 中断: "
+echo ""
+
 # 列出 S3 中的安装包并生成 Presigned URL
 echo "=== 检查 S3 安装包 ==="
 INSTALLERS=$(aws s3 ls "s3://$BUCKET/installers/" --region "$REGION" 2>/dev/null || true)
