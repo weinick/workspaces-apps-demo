@@ -43,6 +43,7 @@ echo ""
 echo "  Region:          $REGION"
 echo "  实例类型:        $INSTANCE_TYPE"
 echo "  计划 Fleet 容量: $REQUIRED_FLEET_CAPACITY"
+echo "  操作系统:        (待选择)"
 
 # ============================================================
 # 1. AWS 凭证和权限检查
@@ -74,25 +75,68 @@ aws cloudformation list-stacks --region "$REGION" --max-items 1 > /dev/null 2>&1
   fail "缺少 CloudFormation 权限"
 
 # ============================================================
-# 2. Base Image 可用性
+# 2. 操作系统选择 & Base Image 可用性
 # ============================================================
-section "2. Base Image 可用性"
+section "2. 操作系统选择 & Base Image 可用性"
 
 IMAGE_FAMILY=$(get_image_family "$INSTANCE_TYPE")
 echo "  实例系列: $IMAGE_FAMILY"
 echo ""
 
+# 交互式询问操作系统
+echo "  您的应用需要哪种操作系统？"
+echo "    1) Windows (Windows Server 2019/2022)"
+echo "    2) Linux   (Amazon Linux 2 / Rocky Linux 8)"
+echo ""
+read -r -p "  请选择 [1/2] (默认 1): " OS_CHOICE
+OS_CHOICE=${OS_CHOICE:-1}
+
+case "$OS_CHOICE" in
+  2|linux|Linux)
+    OS_TYPE="Linux"
+    echo ""
+    echo "  已选择: Linux"
+    echo ""
+    echo "  Linux 发行版选择："
+    echo "    a) Amazon Linux 2  (AWS 原生，长期支持)"
+    echo "    b) Rocky Linux 8   (RHEL 兼容，社区维护)"
+    echo ""
+    read -r -p "  请选择 [a/b] (默认 b): " LINUX_DISTRO
+    LINUX_DISTRO=${LINUX_DISTRO:-b}
+    case "$LINUX_DISTRO" in
+      a|A) LINUX_FILTER="AmazonLinux2" ; LINUX_LABEL="Amazon Linux 2" ;;
+      *)   LINUX_FILTER="RockyLinux8"  ; LINUX_LABEL="Rocky Linux 8"  ;;
+    esac
+    ;;
+  *)
+    OS_TYPE="Windows"
+    echo ""
+    echo "  已选择: Windows"
+    ;;
+esac
+
 if [[ "$IMAGE_FAMILY" == "Unknown" ]]; then
   warn "无法识别实例类型系列，请手动查询 Base Image"
 else
-  # 查询对应系列的公共 Base Image
-  if [[ "$IMAGE_FAMILY" == "Standard" || "$IMAGE_FAMILY" == "Compute" || "$IMAGE_FAMILY" == "Memory" ]]; then
-    QUERY_FILTER="AppStream-WinServer"
+  # 根据实例系列和操作系统构建查询条件
+  if [[ "$OS_TYPE" == "Linux" ]]; then
+    if [[ "$IMAGE_FAMILY" == "Standard" || "$IMAGE_FAMILY" == "Compute" || "$IMAGE_FAMILY" == "Memory" ]]; then
+      QUERY_FILTER="AppStream-${LINUX_FILTER}"
+    else
+      QUERY_FILTER="AppStream-Graphics-${IMAGE_FAMILY}-${LINUX_FILTER}"
+    fi
+    OS_LABEL="$LINUX_LABEL"
   else
-    QUERY_FILTER="AppStream-Graphics-${IMAGE_FAMILY}"
+    if [[ "$IMAGE_FAMILY" == "Standard" || "$IMAGE_FAMILY" == "Compute" || "$IMAGE_FAMILY" == "Memory" ]]; then
+      QUERY_FILTER="AppStream-WinServer"
+    else
+      QUERY_FILTER="AppStream-Graphics-${IMAGE_FAMILY}-WinServer"
+    fi
+    OS_LABEL="Windows"
   fi
 
-  echo "  查询 ${IMAGE_FAMILY} 系列 Base Image（Windows）..."
+  echo ""
+  echo "  查询 ${IMAGE_FAMILY} 系列 Base Image（${OS_LABEL}）..."
   IMAGES=$(aws appstream describe-images \
     --type PUBLIC \
     --region "$REGION" \
@@ -102,7 +146,7 @@ else
   IMAGE_COUNT=$(echo "$IMAGES" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
 
   if [[ "$IMAGE_COUNT" -gt 0 ]]; then
-    pass "${IMAGE_FAMILY} 系列 Base Image 可用（共 ${IMAGE_COUNT} 个）"
+    pass "${IMAGE_FAMILY} 系列 ${OS_LABEL} Base Image 可用（共 ${IMAGE_COUNT} 个）"
     echo ""
     echo "  可用 Base Image 列表（按时间倒序，建议使用最新版本）："
     echo "$IMAGES" | python3 -c "
@@ -124,8 +168,14 @@ print(images[0]['Name']) if images else print('')
 " 2>/dev/null)
     echo "  📋 推荐使用: $RECOMMENDED_IMAGE"
   else
-    fail "${IMAGE_FAMILY} 系列 Base Image 在 ${REGION} 不可用"
-    echo "     请检查该 region 是否支持此实例系列"
+    fail "${IMAGE_FAMILY} 系列 ${OS_LABEL} Base Image 在 ${REGION} 不可用"
+    echo "     请检查该 region 是否支持此实例系列和操作系统组合"
+    # 提示用户可以尝试另一种 OS
+    if [[ "$OS_TYPE" == "Linux" ]]; then
+      echo "     💡 提示: 也可以尝试选择 Windows，通常 Base Image 更齐全"
+    else
+      echo "     💡 提示: 也可以尝试选择 Linux (Amazon Linux 2 / Rocky Linux 8)"
+    fi
   fi
 fi
 
@@ -240,7 +290,7 @@ fi
 
 if [[ -n "${RECOMMENDED_IMAGE:-}" && $FAIL -eq 0 ]]; then
   echo ""
-  echo "  📋 推荐 CloudFormation 部署命令："
+  echo "  📋 推荐 CloudFormation 部署命令（${OS_TYPE:-Windows}，${IMAGE_FAMILY} 系列）："
   echo ""
   echo "  aws cloudformation deploy \\"
   echo "    --template-file cfn-workspaces-apps-demo.yaml \\"
