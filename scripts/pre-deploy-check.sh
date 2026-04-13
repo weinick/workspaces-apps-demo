@@ -108,7 +108,7 @@ if [[ "$IMAGE_FAMILY" == "Unknown" ]]; then
   warn "无法识别实例类型系列，请手动查询 Base Image"
 else
   # 根据实例系列和操作系统构建查询条件
-  # Linux: 同时查询 RockyLinux8 和 AmazonLinux2，自动选最新
+  # Linux: 优先 Amazon Linux 2，不可用时回退到 Rocky Linux 8
   # Windows: 查询 WinServer 系列
   if [[ "$OS_TYPE" == "Linux" ]]; then
     if [[ "$IMAGE_FAMILY" == "Standard" || "$IMAGE_FAMILY" == "Compute" || "$IMAGE_FAMILY" == "Memory" ]]; then
@@ -134,12 +134,32 @@ else
   echo "  查询 ${IMAGE_FAMILY} 系列 Base Image（${OS_LABEL}）..."
 
   if [[ "$OS_TYPE" == "Linux" ]]; then
-    # Linux: 查询所有非 Windows 的 Base Image（包含 RockyLinux8 和 AmazonLinux2），取最新
+    # Linux: 优先查询 AmazonLinux2，如果没有再查 RockyLinux8
+    if [[ "$IMAGE_FAMILY" == "Standard" || "$IMAGE_FAMILY" == "Compute" || "$IMAGE_FAMILY" == "Memory" ]]; then
+      AL2_FILTER="AppStream-AmazonLinux2"
+    else
+      AL2_FILTER="AppStream-Graphics-${IMAGE_FAMILY}-AmazonLinux2"
+    fi
     IMAGES=$(aws appstream describe-images \
       --type PUBLIC \
       --region "$REGION" \
-      --query "Images[?contains(Name, '${QUERY_FILTER}') && !contains(Name, 'WinServer') && State=='AVAILABLE'].{Name:Name,CreatedTime:CreatedTime}" \
+      --query "Images[?contains(Name, '${AL2_FILTER}') && State=='AVAILABLE'].{Name:Name,CreatedTime:CreatedTime}" \
       --output json 2>/dev/null || echo "[]")
+    AL2_COUNT=$(echo "$IMAGES" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+    if [[ "$AL2_COUNT" -eq 0 ]]; then
+      # Amazon Linux 2 不可用，回退到 RockyLinux8
+      echo "  Amazon Linux 2 不可用，尝试 Rocky Linux 8..."
+      if [[ "$IMAGE_FAMILY" == "Standard" || "$IMAGE_FAMILY" == "Compute" || "$IMAGE_FAMILY" == "Memory" ]]; then
+        RL8_FILTER="AppStream-RockyLinux8"
+      else
+        RL8_FILTER="AppStream-Graphics-${IMAGE_FAMILY}-RockyLinux8"
+      fi
+      IMAGES=$(aws appstream describe-images \
+        --type PUBLIC \
+        --region "$REGION" \
+        --query "Images[?contains(Name, '${RL8_FILTER}') && State=='AVAILABLE'].{Name:Name,CreatedTime:CreatedTime}" \
+        --output json 2>/dev/null || echo "[]")
+    fi
   else
     IMAGES=$(aws appstream describe-images \
       --type PUBLIC \
