@@ -23,6 +23,87 @@ BUILDER_SUFFIX="${5:-}"
 header()  { echo ""; echo "══════════════════════════════════════════"; echo "  $1"; echo "══════════════════════════════════════════"; }
 section() { echo ""; echo "── $1 ──"; }
 
+# ============================================================
+# 监控镜像制作（可复用函数）
+# ============================================================
+monitor_image_creation() {
+  section "监控镜像制作"
+  echo ""
+  echo "  正在监控 Image Builder 状态（镜像制作约 20-30 分钟）..."
+  echo "  状态变化: RUNNING → SNAPSHOTTING → STOPPED（完成）"
+  echo ""
+
+  local SNAPSHOT_START=""
+  while true; do
+    local STATE
+    STATE=$(aws appstream describe-image-builders \
+      --names "$BUILDER_NAME" --region "$REGION" \
+      --query 'ImageBuilders[0].State' --output text 2>/dev/null || echo "UNKNOWN")
+
+    local TIMESTAMP
+    TIMESTAMP=$(date '+%H:%M:%S')
+
+    if [[ "$STATE" == "SNAPSHOTTING" && -z "$SNAPSHOT_START" ]]; then
+      SNAPSHOT_START=$(date +%s)
+      echo "  [$TIMESTAMP] 📸 镜像打包中 (SNAPSHOTTING)..."
+    elif [[ "$STATE" == "SNAPSHOTTING" && -n "$SNAPSHOT_START" ]]; then
+      local ELAPSED=$(( $(date +%s) - SNAPSHOT_START ))
+      local ELAPSED_MIN=$((ELAPSED / 60))
+      echo "  [$TIMESTAMP] 📸 镜像打包中... (已用 ${ELAPSED_MIN} 分钟)"
+    elif [[ "$STATE" == "STOPPED" ]]; then
+      echo "  [$TIMESTAMP] ✅ 镜像制作完成！Image Builder 已自动停止"
+      break
+    elif [[ "$STATE" == "RUNNING" ]]; then
+      echo "  [$TIMESTAMP] ⏳ 等待 Create Image 操作... (当前 RUNNING)"
+    else
+      echo "  [$TIMESTAMP] 状态: $STATE"
+    fi
+
+    sleep 30
+  done
+
+  # 查询制作的镜像
+  echo ""
+  section "镜像信息"
+  echo ""
+  echo "  最近创建的自定义镜像："
+  aws appstream describe-images \
+    --type PRIVATE --region "$REGION" \
+    --query 'Images[*].{Name:Name,State:State,Created:CreatedTime}' \
+    --output table 2>/dev/null || echo "  （查询失败，请手动确认）"
+
+  # 获取最新镜像名
+  LATEST_IMAGE=$(aws appstream describe-images \
+    --type PRIVATE --region "$REGION" \
+    --query 'sort_by(Images, &CreatedTime)[-1].Name' \
+    --output text 2>/dev/null || echo "")
+
+  # 输出下一步命令
+  echo ""
+  header "🎉 下一步"
+  echo ""
+  echo "  1. 删除 Image Builder（停止计费）："
+  echo ""
+  echo "     bash scripts/delete-imagebuilder.sh $REGION $STACK_NAME"
+  echo ""
+  echo "  2. 部署 Fleet（region/stack-name/image 已预填，按需修改其余参数）："
+  echo ""
+  if [[ -n "$LATEST_IMAGE" && "$LATEST_IMAGE" != "None" ]]; then
+    echo "     bash scripts/fleet-stack-deploy.sh $REGION $STACK_NAME $LATEST_IMAGE <fleet-suffix> 1 2 <instance-type>"
+  else
+    echo "     bash scripts/fleet-stack-deploy.sh $REGION $STACK_NAME <image-name> <fleet-suffix> 1 2 <instance-type>"
+  fi
+  echo ""
+  echo "     参数说明："
+  echo "       fleet-suffix:   Fleet 名称后缀（如 gpu、standard）"
+  echo "       1 2:            最小/最大实例数（按需调整）"
+  echo "       instance-type:  实例类型（如 stream.graphics.g4dn.xlarge）"
+  echo ""
+}
+
+# ============================================================
+# 主流程
+# ============================================================
 header "WorkSpaces Applications — Image Builder Setup"
 echo ""
 echo "  Region:     $REGION"
@@ -57,6 +138,22 @@ fi
 echo "  S3 Bucket:      $BUCKET"
 echo "  Image Builder:  $BUILDER_NAME"
 
+# 提前检查 Image Builder 状态，如果已在打包镜像则直接进入监控
+INIT_STATE=$(aws appstream describe-image-builders \
+  --names "$BUILDER_NAME" --region "$REGION" \
+  --query 'ImageBuilders[0].State' --output text 2>/dev/null || echo "NOT_FOUND")
+
+if [[ "$INIT_STATE" == "NOT_FOUND" || "$INIT_STATE" == "None" ]]; then
+  echo "  ❌ Image Builder '$BUILDER_NAME' 不存在"; exit 1
+fi
+
+if [[ "$INIT_STATE" == "SNAPSHOTTING" ]]; then
+  echo ""
+  echo "  📸 检测到 Image Builder 正在打包镜像，跳过 Step 2-4，直接进入监控..."
+  monitor_image_creation
+  exit 0
+fi
+
 # ============================================================
 # Step 2: 上传安装包到 S3
 # ============================================================
@@ -74,7 +171,6 @@ read -r -p "  已上传？按 Enter 继续: "
 INSTALLERS=$(aws s3 ls "s3://$BUCKET/installers/" --region "$REGION" 2>/dev/null || true)
 
 if [[ -z "$INSTALLERS" ]]; then
-  # 自动检测根目录文件
   ROOT_FILES=$(aws s3 ls "s3://$BUCKET/" --region "$REGION" 2>/dev/null | grep -v 'PRE ' || true)
   if [[ -n "$ROOT_FILES" ]]; then
     echo ""
@@ -150,23 +246,14 @@ echo "  （详细步骤见 Step 4 完成后的操作指引）"
 # ============================================================
 section "Step 4: 启动 Image Builder"
 
-STATE=$(aws appstream describe-image-builders \
-  --names "$BUILDER_NAME" --region "$REGION" \
-  --query 'ImageBuilders[0].State' --output text 2>/dev/null || echo "NOT_FOUND")
-
-if [[ "$STATE" == "NOT_FOUND" || "$STATE" == "None" ]]; then
-  echo "  ❌ Image Builder '$BUILDER_NAME' 不存在"; exit 1
-fi
-
-if [[ "$STATE" == "SNAPSHOTTING" ]]; then
-  echo "  ⚠️  Image Builder 正在打包镜像，请等待完成后重新运行"
-  exit 0
-elif [[ "$STATE" == "STOPPED" ]]; then
+if [[ "$INIT_STATE" == "STOPPED" ]]; then
   echo "  Image Builder 已停止，正在启动..."
   aws appstream start-image-builder --name "$BUILDER_NAME" --region "$REGION" > /dev/null
+elif [[ "$INIT_STATE" == "RUNNING" ]]; then
+  echo "  Image Builder 已在运行"
 fi
 
-if [[ "$STATE" != "RUNNING" ]]; then
+if [[ "$INIT_STATE" != "RUNNING" ]]; then
   echo "  等待 RUNNING 状态（约 5-10 分钟）..."
   while true; do
     sleep 30
@@ -210,72 +297,4 @@ echo ""
 # ============================================================
 read -r -p "  已在 Image Builder 中点击 Create Image？按 Enter 开始监控: "
 
-section "Step 5: 监控镜像制作"
-echo ""
-echo "  正在监控 Image Builder 状态（镜像制作约 20-30 分钟）..."
-echo "  状态变化: RUNNING → SNAPSHOTTING → STOPPED（完成）"
-echo ""
-
-SNAPSHOT_START=""
-while true; do
-  STATE=$(aws appstream describe-image-builders \
-    --names "$BUILDER_NAME" --region "$REGION" \
-    --query 'ImageBuilders[0].State' --output text 2>/dev/null || echo "UNKNOWN")
-
-  TIMESTAMP=$(date '+%H:%M:%S')
-
-  if [[ "$STATE" == "SNAPSHOTTING" && -z "$SNAPSHOT_START" ]]; then
-    SNAPSHOT_START=$(date +%s)
-    echo "  [$TIMESTAMP] 📸 镜像打包中 (SNAPSHOTTING)..."
-  elif [[ "$STATE" == "SNAPSHOTTING" && -n "$SNAPSHOT_START" ]]; then
-    ELAPSED=$(( $(date +%s) - SNAPSHOT_START ))
-    ELAPSED_MIN=$((ELAPSED / 60))
-    echo "  [$TIMESTAMP] 📸 镜像打包中... (已用 ${ELAPSED_MIN} 分钟)"
-  elif [[ "$STATE" == "STOPPED" ]]; then
-    echo "  [$TIMESTAMP] ✅ 镜像制作完成！Image Builder 已自动停止"
-    break
-  elif [[ "$STATE" == "RUNNING" ]]; then
-    echo "  [$TIMESTAMP] ⏳ 等待 Create Image 操作... (当前 RUNNING)"
-  else
-    echo "  [$TIMESTAMP] 状态: $STATE"
-  fi
-
-  sleep 30
-done
-
-# 查询刚制作的镜像
-echo ""
-section "镜像信息"
-echo ""
-echo "  最近创建的自定义镜像："
-aws appstream describe-images \
-  --type PRIVATE --region "$REGION" \
-  --query 'Images[*].{Name:Name,State:State,Created:CreatedTime}' \
-  --output table 2>/dev/null || echo "  （查询失败，请手动确认）"
-
-# 获取最新的自定义镜像名（按创建时间倒序）
-LATEST_IMAGE=$(aws appstream describe-images \
-  --type PRIVATE --region "$REGION" \
-  --query 'sort_by(Images, &CreatedTime)[-1].Name' \
-  --output text 2>/dev/null || echo "")
-
-echo ""
-header "🎉 下一步"
-echo ""
-echo "  1. 删除 Image Builder（停止计费）："
-echo ""
-echo "     bash scripts/delete-imagebuilder.sh $REGION $STACK_NAME"
-echo ""
-echo "  2. 部署 Fleet（region/stack-name/image 已预填，按需修改其余参数）："
-echo ""
-if [[ -n "$LATEST_IMAGE" && "$LATEST_IMAGE" != "None" ]]; then
-  echo "     bash scripts/fleet-stack-deploy.sh $REGION $STACK_NAME $LATEST_IMAGE <fleet-suffix> 1 2 <instance-type>"
-else
-  echo "     bash scripts/fleet-stack-deploy.sh $REGION $STACK_NAME <image-name> <fleet-suffix> 1 2 <instance-type>"
-fi
-echo ""
-echo "     参数说明："
-echo "       fleet-suffix:   Fleet 名称后缀（如 gpu、standard）"
-echo "       1 2:            最小/最大实例数（按需调整）"
-echo "       instance-type:  实例类型（如 stream.graphics.g4dn.xlarge）"
-echo ""
+monitor_image_creation
