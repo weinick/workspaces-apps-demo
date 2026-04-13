@@ -142,6 +142,8 @@ echo "  │    PowerShell（管理员）中粘贴执行                     │"
 echo "  └─────────────────────────────────────────────────────┘"
 echo ""
 echo "$PRESIGN_CMDS"
+echo "  ⬇️  下载后操作流程：安装软件 → 打开 Image Assistant → Add App → Create Image"
+echo "  （详细步骤见 Step 4 完成后的操作指引）"
 
 # ============================================================
 # Step 4: 启动 Image Builder & 生成登录 URL
