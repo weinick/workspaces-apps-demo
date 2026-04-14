@@ -36,7 +36,7 @@ monitor_image_creation() {
   local SNAPSHOT_START=""
   while true; do
     local STATE
-    STATE=$(aws appstream describe-image-builders \
+    STATE=$(aws appstream describe-image-builders --profile global \
       --names "$BUILDER_NAME" --region "$REGION" \
       --query 'ImageBuilders[0].State' --output text 2>/dev/null || echo "UNKNOWN")
 
@@ -67,13 +67,13 @@ monitor_image_creation() {
   section "镜像信息"
   echo ""
   echo "  最近创建的自定义镜像："
-  aws appstream describe-images \
+  aws appstream describe-images --profile global \
     --type PRIVATE --region "$REGION" \
     --query 'Images[*].{Name:Name,State:State,Created:CreatedTime}' \
     --output table 2>/dev/null || echo "  （查询失败，请手动确认）"
 
   # 获取最新镜像名
-  LATEST_IMAGE=$(aws appstream describe-images \
+  LATEST_IMAGE=$(aws appstream describe-images --profile global \
     --type PRIVATE --region "$REGION" \
     --query 'sort_by(Images, &CreatedTime)[-1].Name' \
     --output text 2>/dev/null || echo "")
@@ -114,12 +114,12 @@ echo "  Stack:      $STACK_NAME"
 # ============================================================
 section "Step 1: 读取 CloudFormation 配置"
 
-BUCKET=$(aws cloudformation describe-stacks \
+BUCKET=$(aws cloudformation describe-stacks --profile global \
   --stack-name "$STACK_NAME" --region "$REGION" \
   --query 'Stacks[0].Outputs[?OutputKey==`InstallerBucketName`].OutputValue' \
   --output text 2>/dev/null || true)
 
-BUILDER_NAME=$(aws cloudformation describe-stacks \
+BUILDER_NAME=$(aws cloudformation describe-stacks --profile global \
   --stack-name "$STACK_NAME" --region "$REGION" \
   --query 'Stacks[0].Outputs[?OutputKey==`ImageBuilderName`].OutputValue' \
   --output text 2>/dev/null || true)
@@ -139,7 +139,7 @@ echo "  S3 Bucket:      $BUCKET"
 echo "  Image Builder:  $BUILDER_NAME"
 
 # 提前检查 Image Builder 状态，如果已在打包镜像则直接进入监控
-INIT_STATE=$(aws appstream describe-image-builders \
+INIT_STATE=$(aws appstream describe-image-builders --profile global \
   --names "$BUILDER_NAME" --region "$REGION" \
   --query 'ImageBuilders[0].State' --output text 2>/dev/null || echo "NOT_FOUND")
 
@@ -162,16 +162,16 @@ section "Step 2: 上传安装包到 S3"
 echo ""
 echo "  请确保已将安装包上传到 S3（如尚未上传，按 Ctrl+C 中断后执行）："
 echo ""
-echo "    aws s3 cp <file> s3://$BUCKET/installers/ --region $REGION"
-echo "    # 批量: aws s3 cp ./installers/ s3://$BUCKET/installers/ --region $REGION --recursive"
+echo "    aws s3 cp <file> s3://$BUCKET/installers/ --profile global --profile global --region $REGION"
+echo "    # 批量: aws s3 cp ./installers/ s3://$BUCKET/installers/ --profile global --profile global --region $REGION --recursive"
 echo ""
 read -r -p "  已上传？按 Enter 继续: "
 
 # 检查安装包
-INSTALLERS=$(aws s3 ls "s3://$BUCKET/installers/" --region "$REGION" 2>/dev/null || true)
+INSTALLERS=$(aws s3 ls "s3://$BUCKET/installers/" --profile global --region "$REGION" 2>/dev/null || true)
 
 if [[ -z "$INSTALLERS" ]]; then
-  ROOT_FILES=$(aws s3 ls "s3://$BUCKET/" --region "$REGION" 2>/dev/null | grep -v 'PRE ' || true)
+  ROOT_FILES=$(aws s3 ls "s3://$BUCKET/" --profile global --region "$REGION" 2>/dev/null | grep -v 'PRE ' || true)
   if [[ -n "$ROOT_FILES" ]]; then
     echo ""
     echo "  💡 检测到文件在 Bucket 根目录，自动移动到 installers/..."
@@ -179,14 +179,14 @@ if [[ -z "$INSTALLERS" ]]; then
       FNAME=$(echo "$line" | awk '{print $4}')
       [[ -z "$FNAME" ]] && continue
       echo "     移动: $FNAME → installers/$FNAME"
-      aws s3 mv "s3://$BUCKET/$FNAME" "s3://$BUCKET/installers/$FNAME" --region "$REGION" > /dev/null
+      aws s3 mv "s3://$BUCKET/$FNAME" "s3://$BUCKET/installers/$FNAME" --profile global --region "$REGION" > /dev/null
     done <<< "$ROOT_FILES"
-    INSTALLERS=$(aws s3 ls "s3://$BUCKET/installers/" --region "$REGION" 2>/dev/null || true)
+    INSTALLERS=$(aws s3 ls "s3://$BUCKET/installers/" --profile global --region "$REGION" 2>/dev/null || true)
   fi
   if [[ -z "$INSTALLERS" ]]; then
     echo ""
     echo "  ❌ S3 中没有安装包，请上传后重新运行"
-    echo "     aws s3 cp <file> s3://$BUCKET/installers/ --region $REGION"
+    echo "     aws s3 cp <file> s3://$BUCKET/installers/ --profile global --profile global --region $REGION"
     exit 1
   fi
 fi
@@ -217,7 +217,7 @@ while IFS= read -r line; do
   fi
 
   MATCHED=$((MATCHED+1))
-  PRESIGNED_URL=$(aws s3 presign "s3://$BUCKET/installers/$FILENAME" \
+  PRESIGNED_URL=$(aws s3 presign "s3://$BUCKET/installers/$FILENAME" --profile global \
     --region "$REGION" --expires-in "$PRESIGN_EXPIRES")
   SAFE_NAME=$(echo "$FILENAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
 
@@ -248,7 +248,7 @@ section "Step 4: 启动 Image Builder"
 
 if [[ "$INIT_STATE" == "STOPPED" ]]; then
   echo "  Image Builder 已停止，正在启动..."
-  aws appstream start-image-builder --name "$BUILDER_NAME" --region "$REGION" > /dev/null
+  aws appstream start-image-builder --name "$BUILDER_NAME" --profile global --region "$REGION" > /dev/null
 elif [[ "$INIT_STATE" == "RUNNING" ]]; then
   echo "  Image Builder 已在运行"
 fi
@@ -257,7 +257,7 @@ if [[ "$INIT_STATE" != "RUNNING" ]]; then
   echo "  等待 RUNNING 状态（约 5-10 分钟）..."
   while true; do
     sleep 30
-    STATE=$(aws appstream describe-image-builders \
+    STATE=$(aws appstream describe-image-builders --profile global \
       --names "$BUILDER_NAME" --region "$REGION" \
       --query 'ImageBuilders[0].State' --output text 2>/dev/null || echo "UNKNOWN")
     echo "  状态: $STATE"
@@ -269,7 +269,7 @@ fi
 echo "  ✅ Image Builder RUNNING"
 echo ""
 
-LOGIN_URL=$(aws appstream create-image-builder-streaming-url \
+LOGIN_URL=$(aws appstream create-image-builder-streaming-url --profile global \
   --name "$BUILDER_NAME" --region "$REGION" \
   --validity 3600 --query 'StreamingURL' --output text)
 

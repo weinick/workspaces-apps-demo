@@ -59,7 +59,7 @@ fi
 # 工具函数：获取 Fleet 状态
 # ============================================================
 get_fleet_status() {
-  aws appstream describe-fleets \
+  aws appstream describe-fleets --profile global \
     --names "$FLEET_NAME" --region "$REGION" \
     --query 'Fleets[0].ComputeCapacityStatus' \
     --output json 2>/dev/null || echo "{}"
@@ -69,7 +69,7 @@ print_status() {
   local info
   info=$(get_fleet_status)
   local state
-  state=$(aws appstream describe-fleets \
+  state=$(aws appstream describe-fleets --profile global \
     --names "$FLEET_NAME" --region "$REGION" \
     --query 'Fleets[0].State' --output text 2>/dev/null || echo "UNKNOWN")
 
@@ -92,7 +92,7 @@ print_status() {
 # ============================================================
 check_fleet_exists() {
   local name
-  name=$(aws appstream describe-fleets \
+  name=$(aws appstream describe-fleets --profile global \
     --names "$FLEET_NAME" --region "$REGION" \
     --query 'Fleets[0].Name' --output text 2>/dev/null || echo "")
   if [[ -z "$name" || "$name" == "None" ]]; then
@@ -133,7 +133,7 @@ if [[ "$ACTION" == "down" ]]; then
   fi
 
   # 更新 Auto Scaling 边界
-  aws application-autoscaling register-scalable-target \
+  aws application-autoscaling register-scalable-target --profile global \
     --service-namespace appstream \
     --resource-id "fleet/$FLEET_NAME" \
     --scalable-dimension appstream:fleet:DesiredCapacity \
@@ -142,7 +142,7 @@ if [[ "$ACTION" == "down" ]]; then
     --region "$REGION" 2>/dev/null || true
 
   # 设置 DesiredInstances=0
-  aws appstream update-fleet \
+  aws appstream update-fleet --profile global \
     --name "$FLEET_NAME" \
     --compute-capacity DesiredInstances=0 \
     --region "$REGION" > /dev/null
@@ -178,7 +178,7 @@ if [[ "$ACTION" == "scale" ]]; then
   echo "Fleet: $FLEET_NAME | Region: $REGION | DesiredInstances: $COUNT"
 
   # 同步更新 Auto Scaling 边界
-  aws application-autoscaling register-scalable-target \
+  aws application-autoscaling register-scalable-target --profile global \
     --service-namespace appstream \
     --resource-id "fleet/$FLEET_NAME" \
     --scalable-dimension appstream:fleet:DesiredCapacity \
@@ -186,7 +186,7 @@ if [[ "$ACTION" == "scale" ]]; then
     --max-capacity "$COUNT" \
     --region "$REGION" 2>/dev/null || true
 
-  aws appstream update-fleet \
+  aws appstream update-fleet --profile global \
     --name "$FLEET_NAME" \
     --compute-capacity DesiredInstances="$COUNT" \
     --region "$REGION" > /dev/null
@@ -208,7 +208,7 @@ if [[ "$ACTION" == "warmup" ]]; then
   echo ""
 
   # 更新 Auto Scaling 边界
-  aws application-autoscaling register-scalable-target \
+  aws application-autoscaling register-scalable-target --profile global \
     --service-namespace appstream \
     --resource-id "fleet/$FLEET_NAME" \
     --scalable-dimension appstream:fleet:DesiredCapacity \
@@ -217,7 +217,7 @@ if [[ "$ACTION" == "warmup" ]]; then
     --region "$REGION" 2>/dev/null || true
 
   # 设置目标容量
-  aws appstream update-fleet \
+  aws appstream update-fleet --profile global \
     --name "$FLEET_NAME" \
     --compute-capacity DesiredInstances="$COUNT" \
     --region "$REGION" > /dev/null

@@ -91,12 +91,12 @@ STACK_NAME="${CFN_STACK_NAME}-${FLEET_SUFFIX}-stack"
 # 读取 CFN 网络配置
 # ============================================================
 echo "=== 读取 CloudFormation 网络配置 ==="
-PRIVATE_SUBNET=$(aws cloudformation describe-stacks \
+PRIVATE_SUBNET=$(aws cloudformation describe-stacks --profile global \
   --stack-name "$CFN_STACK_NAME" --region "$REGION" \
   --query 'Stacks[0].Outputs[?OutputKey==`PrivateSubnet1Id`].OutputValue' \
   --output text)
 
-FLEET_SG=$(aws cloudformation describe-stacks \
+FLEET_SG=$(aws cloudformation describe-stacks --profile global \
   --stack-name "$CFN_STACK_NAME" --region "$REGION" \
   --query 'Stacks[0].Outputs[?OutputKey==`FleetSecurityGroupId`].OutputValue' \
   --output text)
@@ -120,12 +120,12 @@ echo "SG:           $FLEET_SG"
 echo ""
 echo "=== [1/5] 创建 Fleet ==="
 
-FLEET_EXISTS=$(aws appstream describe-fleets \
+FLEET_EXISTS=$(aws appstream describe-fleets --profile global \
   --names "$FLEET_NAME" --region "$REGION" \
   --query 'Fleets[0].Name' --output text 2>/dev/null || echo "")
 
 if [[ -z "$FLEET_EXISTS" || "$FLEET_EXISTS" == "None" ]]; then
-  aws appstream create-fleet \
+  aws appstream create-fleet --profile global \
     --name "$FLEET_NAME" \
     --image-name "$CUSTOM_IMAGE_NAME" \
     --instance-type "$FLEET_INSTANCE_TYPE" \
@@ -146,9 +146,9 @@ else
 fi
 
 echo "启动 Fleet 并等待 RUNNING..."
-aws appstream start-fleet --name "$FLEET_NAME" --region "$REGION" 2>/dev/null || true
+aws appstream start-fleet --name "$FLEET_NAME" --profile global --region "$REGION" 2>/dev/null || true
 while true; do
-  STATE=$(aws appstream describe-fleets \
+  STATE=$(aws appstream describe-fleets --profile global \
     --names "$FLEET_NAME" --region "$REGION" \
     --query 'Fleets[0].State' --output text)
   echo "  Fleet 状态: $STATE"
@@ -166,7 +166,7 @@ echo "=== [2/5] 配置 Auto Scaling ==="
 if [[ "$FLEET_TYPE" == "ELASTIC" ]]; then
   echo "ℹ️  ELASTIC fleet 由 AWS 全托管扩缩容，跳过 Auto Scaling 配置"
 else
-  aws application-autoscaling register-scalable-target \
+  aws application-autoscaling register-scalable-target --profile global \
     --service-namespace appstream \
     --resource-id "fleet/$FLEET_NAME" \
     --scalable-dimension appstream:fleet:DesiredCapacity \
@@ -174,7 +174,7 @@ else
     --max-capacity "$MAX_CAPACITY" \
     --region "$REGION"
 
-  aws application-autoscaling put-scaling-policy \
+  aws application-autoscaling put-scaling-policy --profile global \
     --policy-name "${FLEET_NAME}-scale-out" \
     --service-namespace appstream \
     --resource-id "fleet/$FLEET_NAME" \
@@ -198,12 +198,12 @@ fi
 echo ""
 echo "=== [3/5] 创建 Stack ==="
 
-STACK_EXISTS=$(aws appstream describe-stacks \
+STACK_EXISTS=$(aws appstream describe-stacks --profile global \
   --names "$STACK_NAME" --region "$REGION" \
   --query 'Stacks[0].Name' --output text 2>/dev/null || echo "")
 
 if [[ -z "$STACK_EXISTS" || "$STACK_EXISTS" == "None" ]]; then
-  aws appstream create-stack \
+  aws appstream create-stack --profile global \
     --name "$STACK_NAME" \
     --display-name "${CFN_STACK_NAME} ${FLEET_SUFFIX} Stack" \
     --description "WorkSpaces Applications Stack - ${CFN_STACK_NAME}/${FLEET_SUFFIX}" \
@@ -225,7 +225,7 @@ fi
 # ============================================================
 echo ""
 echo "=== [4/5] 关联 Fleet 和 Stack ==="
-aws appstream associate-fleet \
+aws appstream associate-fleet --profile global \
   --fleet-name "$FLEET_NAME" \
   --stack-name "$STACK_NAME" \
   --region "$REGION" 2>/dev/null && echo "关联成功 ✅" || echo "已关联，跳过"
@@ -247,8 +247,8 @@ echo "Auto Scaling: Min=$MIN_CAPACITY, Max=$MAX_CAPACITY"
 echo "会话最大时长: ${MAX_SESSION_SECONDS}s ($((MAX_SESSION_SECONDS/3600))h$((MAX_SESSION_SECONDS%3600/60))m)"
 echo ""
 echo "下一步 - 预热实例（培训前执行）："
-echo "  bash scale-fleet.sh warmup <count> （ENV_NAME=${CFN_STACK_NAME}-${FLEET_SUFFIX}）"
-echo "  ENV_NAME=${CFN_STACK_NAME}-${FLEET_SUFFIX} bash scale-fleet.sh warmup $MIN_CAPACITY"
+echo "  bash scripts/scale-fleet.sh warmup <count> （ENV_NAME=${CFN_STACK_NAME}-${FLEET_SUFFIX}）"
+echo "  ENV_NAME=${CFN_STACK_NAME}-${FLEET_SUFFIX} bash scripts/scale-fleet.sh warmup $MIN_CAPACITY"
 echo ""
 echo "下一步 - 生成 Streaming URL："
-echo "  bash generate-urls.sh $REGION ${CFN_STACK_NAME}-${FLEET_SUFFIX} <人数> <有效期小时>"
+echo "  bash scripts/generate-urls.sh $REGION ${CFN_STACK_NAME}-${FLEET_SUFFIX} <人数> <有效期小时>"
