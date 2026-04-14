@@ -65,7 +65,7 @@ echo "Fleet RUNNING ✅ (Desired: $DESIRED, Available: $AVAILABLE)"
 if [[ "$AVAILABLE" -lt "$STUDENT_COUNT" ]]; then
   echo ""
   echo "⚠️  警告: 当前可用实例数 ($AVAILABLE) 少于学员人数 ($STUDENT_COUNT)"
-  echo "   建议先预热: ENV_NAME=${ENV_NAME} bash scripts/scale-fleet.sh warmup $STUDENT_COUNT"
+  echo "   建议先预热: REGION=${REGION} ENV_NAME=${ENV_NAME} bash scripts/scale-fleet.sh warmup $STUDENT_COUNT"
   echo ""
 fi
 
@@ -127,4 +127,4 @@ echo "分发说明:"
 echo "  - CSV 格式：用 Excel 打开，A 列编号对应学员座位，C 列为链接，D 列为过期时间"
 echo "  - 每人一条链接，互不干扰，同一链接不支持多人同时使用"
 echo "  - 链接过期后重新执行本脚本生成新 URL"
-echo "  - 培训结束后执行: ENV_NAME=${ENV_NAME} bash scripts/scale-fleet.sh down"
+echo "  - 培训结束后执行: REGION=${REGION} ENV_NAME=${ENV_NAME} bash scripts/scale-fleet.sh down"
