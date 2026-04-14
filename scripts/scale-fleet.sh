@@ -148,13 +148,18 @@ if [[ "$ACTION" == "down" ]]; then
     --region "$REGION" > /dev/null
 
   echo "✅ 容量已设为 0，等待实例释放..."
+  echo "   （在线用户的会话将持续到超时或主动断开，不会被强制中断）"
   echo ""
   while true; do
     INFO=$(get_fleet_status)
     RUNNING=$(echo "$INFO" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('Running', 0))")
     DESIRED=$(echo "$INFO" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('Desired', 0))")
-    echo "  Running: $RUNNING  Desired: $DESIRED"
+    IN_USE=$(echo "$INFO" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('InUse', 0))")
+    echo "  Running: $RUNNING  InUse: $IN_USE  Desired: $DESIRED"
     [[ "$RUNNING" -eq 0 && "$DESIRED" -eq 0 ]] && break
+    if [[ "$IN_USE" -gt 0 ]]; then
+      echo "  ⏳ 仍有 $IN_USE 个用户在线，等待会话结束..."
+    fi
     sleep 30
   done
   echo ""
