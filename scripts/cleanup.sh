@@ -110,9 +110,53 @@ echo ""
 echo "=============================="
 echo "✅ Fleet 资源清理完成"
 echo "=============================="
+
+# ---- 6. 询问是否删除 CFN Stack ----
 echo ""
-echo "如需删除 Image Builder（如不再制作镜像）："
-echo "  bash scripts/delete-imagebuilder.sh $REGION $CFN_STACK_NAME"
-echo ""
-echo "如需删除全部基础设施（VPC、S3、IAM 等），请在所有 Fleet 清理完后执行："
-echo "  aws cloudformation delete-stack --stack-name $CFN_STACK_NAME --region $REGION"
+read -r -p "是否同时删除 CloudFormation Stack（VPC、S3、IAM 等全部基础设施）？(y/N) " DEL_CFN
+if [[ "$DEL_CFN" == "y" || "$DEL_CFN" == "Y" ]]; then
+  # 先删除所有 Image Builder
+  echo ""
+  echo "=== 清理 Image Builder ==="
+  BUILDERS=$(aws appstream describe-image-builders --region "$REGION" \
+    --query "ImageBuilders[?contains(Name, '${CFN_STACK_NAME}')].Name" \
+    --output text 2>/dev/null || true)
+  if [[ -n "$BUILDERS" && "$BUILDERS" != "None" ]]; then
+    for BUILDER in $BUILDERS; do
+      echo "  删除 Image Builder: $BUILDER"
+      bash scripts/delete-imagebuilder.sh "$REGION" "$CFN_STACK_NAME" 2>/dev/null <<< "y" || true
+    done
+  else
+    echo "  无 Image Builder，跳过"
+  fi
+
+  # 清空 S3 Bucket（CFN 删除前必须清空）
+  echo ""
+  echo "=== 清空 S3 Bucket ==="
+  BUCKET=$(aws cloudformation describe-stacks \
+    --stack-name "$CFN_STACK_NAME" --region "$REGION" \
+    --query 'Stacks[0].Outputs[?OutputKey==`InstallerBucketName`].OutputValue' \
+    --output text 2>/dev/null || true)
+  if [[ -n "$BUCKET" && "$BUCKET" != "None" ]]; then
+    echo "  清空 s3://$BUCKET ..."
+    aws s3 rm "s3://$BUCKET" --recursive --region "$REGION" > /dev/null 2>&1 || true
+    echo "  ✅ Bucket 已清空"
+  fi
+
+  # 删除 CFN Stack
+  echo ""
+  echo "=== 删除 CloudFormation Stack ==="
+  aws cloudformation delete-stack --stack-name "$CFN_STACK_NAME" --region "$REGION"
+  echo "  等待 Stack 删除完成（约 5-10 分钟）..."
+  aws cloudformation wait stack-delete-complete --stack-name "$CFN_STACK_NAME" --region "$REGION" 2>/dev/null
+  echo "  ✅ CloudFormation Stack '$CFN_STACK_NAME' 已删除"
+  echo ""
+  echo "=============================="
+  echo "✅ 所有资源已清理完毕"
+  echo "=============================="
+else
+  echo ""
+  echo "如需后续删除全部基础设施："
+  echo "  bash scripts/delete-imagebuilder.sh $REGION $CFN_STACK_NAME"
+  echo "  aws cloudformation delete-stack --stack-name $CFN_STACK_NAME --region $REGION"
+fi
