@@ -22,10 +22,26 @@
 
 set -euo pipefail
 
+# 自动加载 .env 文件
+if [[ -n "${ENV_NAME:-}" && -f ".env.${ENV_NAME}" ]]; then
+  source ".env.${ENV_NAME}"
+elif [[ -z "${ENV_NAME:-}" && -z "${2:-}" ]]; then
+  # 自动发现：如果只有一个 .env.* 文件，自动加载
+  ENV_FILES=(.env.*)
+  if [[ ${#ENV_FILES[@]} -eq 1 && -f "${ENV_FILES[0]}" ]]; then
+    source "${ENV_FILES[0]}"
+  fi
+fi
+
 REGION="${1:-${REGION:-}}"
 
 if [[ -z "$REGION" ]]; then
   echo "❌ 必须指定 Region"
+  echo ""
+  echo "方式 1 — source .env 文件（由 fleet-stack-deploy.sh 自动生成）："
+  echo "  source .env.<env-name> && $0"
+  echo ""
+  echo "方式 2 — 手动指定："
   echo "  REGION=<region> ENV_NAME=<name> $0"
   echo "  $0 <region> <cfn-stack-name> <fleet-suffix>"
   exit 1

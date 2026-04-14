@@ -24,16 +24,29 @@
 set -euo pipefail
 
 ACTION="${1:-}"
+
+# 自动加载 .env 文件（如果 ENV_NAME 已设置，尝试加载对应的 .env 文件）
+if [[ -n "${ENV_NAME:-}" && -f ".env.${ENV_NAME}" ]]; then
+  source ".env.${ENV_NAME}"
+elif [[ -z "${ENV_NAME:-}" ]]; then
+  # 自动发现：如果只有一个 .env.* 文件，自动加载
+  ENV_FILES=(.env.*)
+  if [[ ${#ENV_FILES[@]} -eq 1 && -f "${ENV_FILES[0]}" ]]; then
+    source "${ENV_FILES[0]}"
+  fi
+fi
+
 REGION="${REGION:-}"
 ENV_NAME="${ENV_NAME:-}"
 
 if [[ -z "$REGION" || -z "$ENV_NAME" ]]; then
-  echo "❌ 必须指定 REGION 和 ENV_NAME 环境变量"
-  echo "  REGION=<region> ENV_NAME=<env-name> $0 <action> [count]"
+  echo "❌ 必须指定 REGION 和 ENV_NAME"
   echo ""
-  echo "示例:"
-  echo "  REGION=eu-central-1 ENV_NAME=my-demo-gpu $0 warmup 20"
-  echo "  REGION=eu-central-1 ENV_NAME=my-demo-gpu $0 down"
+  echo "方式 1 — source .env 文件（由 fleet-stack-deploy.sh 自动生成）："
+  echo "  source .env.<env-name> && $0 <action> [count]"
+  echo ""
+  echo "方式 2 — 手动指定环境变量："
+  echo "  REGION=<region> ENV_NAME=<env-name> $0 <action> [count]"
   exit 1
 fi
 
@@ -185,7 +198,7 @@ if [[ "$ACTION" == "down" ]]; then
 
   echo ""
   echo "下一步 — 如需彻底删除 Fleet/Stack/镜像等资源："
-  echo "  REGION=$REGION ENV_NAME=$ENV_NAME bash scripts/cleanup.sh"
+  echo "  bash scripts/cleanup.sh"
   if [[ -n "$IMAGE_NAME" ]]; then
     echo ""
     echo "当前 Fleet 使用的镜像: $IMAGE_NAME"
