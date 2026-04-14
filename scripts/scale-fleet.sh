@@ -147,8 +147,18 @@ if [[ "$ACTION" == "down" ]]; then
     --compute-capacity DesiredInstances=0 \
     --region "$REGION" > /dev/null
 
-  echo "✅ 容量已设为 0，stopped instance 费用停止计费"
-  echo "   （当前在线用户的会话将持续到会话超时或主动断开）"
+  echo "✅ 容量已设为 0，等待实例释放..."
+  echo ""
+  while true; do
+    INFO=$(get_fleet_status)
+    RUNNING=$(echo "$INFO" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('Running', 0))")
+    DESIRED=$(echo "$INFO" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('Desired', 0))")
+    echo "  Running: $RUNNING  Desired: $DESIRED"
+    [[ "$RUNNING" -eq 0 && "$DESIRED" -eq 0 ]] && break
+    sleep 30
+  done
+  echo ""
+  echo "✅ 归零完成，stopped instance 费用已停止"
   echo ""
   print_status
   exit 0
@@ -191,7 +201,19 @@ if [[ "$ACTION" == "scale" ]]; then
     --compute-capacity DesiredInstances="$COUNT" \
     --region "$REGION" > /dev/null
 
-  echo "✅ Desired 已设为 ${COUNT}（实例正在启动，无需等待）"
+  echo "✅ Desired 已设为 ${COUNT}，等待实例就绪..."
+  echo ""
+  while true; do
+    INFO=$(get_fleet_status)
+    AVAILABLE=$(echo "$INFO" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('Available', 0))")
+    IN_USE=$(echo "$INFO" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('InUse', 0))")
+    READY=$((AVAILABLE + IN_USE))
+    echo "  就绪: ${READY}/${COUNT}  (Available: $AVAILABLE, InUse: $IN_USE)"
+    [[ "$READY" -ge "$COUNT" ]] && break
+    sleep 30
+  done
+  echo ""
+  echo "✅ $COUNT 个实例已就绪"
   echo ""
   print_status
   exit 0
