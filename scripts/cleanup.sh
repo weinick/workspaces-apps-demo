@@ -33,12 +33,23 @@ if [[ -n "${2:-}" && -n "${3:-}" ]]; then
   FLEET_SUFFIX="$3"
   CUSTOM_IMAGE_NAME="${4:-}"
 elif [[ -n "${ENV_NAME:-}" ]]; then
-  # 环境变量模式：从 Fleet 描述中自动获取镜像名
+  # 环境变量模式：从 Fleet 描述和 tag 中自动获取镜像名和 CFN Stack 名称
   FLEET_NAME="${ENV_NAME}-fleet"
   CUSTOM_IMAGE_NAME=$(aws appstream describe-fleets \
     --names "$FLEET_NAME" --region "$REGION" \
     --query 'Fleets[0].ImageName' --output text 2>/dev/null || echo "")
   [[ "$CUSTOM_IMAGE_NAME" == "None" ]] && CUSTOM_IMAGE_NAME=""
+
+  # 从 Fleet tag 读取 CFN Stack 名称
+  FLEET_ARN=$(aws appstream describe-fleets \
+    --names "$FLEET_NAME" --region "$REGION" \
+    --query 'Fleets[0].Arn' --output text 2>/dev/null || echo "")
+  if [[ -n "$FLEET_ARN" && "$FLEET_ARN" != "None" ]]; then
+    CFN_STACK_NAME=$(aws appstream list-tags-for-resource \
+      --resource-arn "$FLEET_ARN" --region "$REGION" \
+      --query 'Tags.CfnStackName' --output text 2>/dev/null || echo "")
+    [[ "$CFN_STACK_NAME" == "None" ]] && CFN_STACK_NAME=""
+  fi
 else
   echo "Usage:"
   echo "  $0 <region> <cfn-stack-name> <fleet-suffix> [custom-image-name]"

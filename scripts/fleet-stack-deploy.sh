@@ -139,6 +139,7 @@ if [[ -z "$FLEET_EXISTS" || "$FLEET_EXISTS" == "None" ]]; then
     --max-user-duration-in-seconds "$MAX_SESSION_SECONDS" \
     --disconnect-timeout-in-seconds "$DISCONNECT_SECONDS" \
     --idle-disconnect-timeout-in-seconds "$IDLE_SECONDS" \
+    --tags CfnStackName="$CFN_STACK_NAME" FleetSuffix="$FLEET_SUFFIX" \
     --output json > /dev/null
   echo "Fleet 创建成功 ✅"
 else
