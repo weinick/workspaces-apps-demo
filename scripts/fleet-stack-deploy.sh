@@ -20,12 +20,15 @@ MIN_CAPACITY="${5:-2}"              # Fleet 最小实例数
 MAX_CAPACITY="${6:-20}"             # Fleet 最大实例数（Auto Scaling 上限）
 FLEET_INSTANCE_TYPE="${7:-}"        # 必须提供：实例类型
 FLEET_TYPE="${8:-ON_DEMAND}"        # Fleet 类型（ON_DEMAND / ALWAYS_ON / ELASTIC）
+MAX_SESSION_SECONDS="${9:-9000}"    # 会话最长时间（秒），默认 9000（2.5 小时）
+DISCONNECT_SECONDS="${10:-900}"     # 断开连接后超时（秒），默认 900（15 分钟）
+IDLE_SECONDS="${11:-900}"            # 空闲断开超时（秒），默认 900（15 分钟）
 
 # ============================================================
 # 帮助信息
 # ============================================================
 usage() {
-  echo "Usage: $0 <region> <cfn-stack-name> <image-name> <fleet-suffix> [min] [max] <instance-type> [fleet-type]"
+  echo "Usage: $0 <region> <cfn-stack-name> <image-name> <fleet-suffix> [min] [max] <instance-type> [fleet-type] [max-session] [disconnect-timeout] [idle-timeout]"
   echo ""
   echo "必填参数:"
   echo "  region          AWS 区域 (如 ap-southeast-1)"
@@ -35,9 +38,12 @@ usage() {
   echo "  instance-type   实例类型（见下方参考）"
   echo ""
   echo "可选参数:"
-  echo "  min             最小实例数，默认 2"
-  echo "  max             最大实例数（Auto Scaling 上限），默认 20"
-  echo "  fleet-type      Fleet 类型，默认 ON_DEMAND"
+  echo "  min                  最小实例数，默认 2"
+  echo "  max                  最大实例数（Auto Scaling 上限），默认 20"
+  echo "  fleet-type           Fleet 类型，默认 ON_DEMAND"
+  echo "  max-session          会话最长时间（秒），默认 9000（2.5h），范围 600-432000"
+  echo "  disconnect-timeout   断开连接后保持实例超时（秒），默认 900（15min），范围 60-432000"
+  echo "  idle-timeout         空闲自动断开超时（秒），默认 900（15min），范围 60-3600（0=不断开）"
   echo ""
   echo "Fleet 类型说明:"
   echo "  ON_DEMAND   按需启动，有用户时才计全价，无用户时收极小的 stopped 费用。"
@@ -102,6 +108,9 @@ echo "Image:        $CUSTOM_IMAGE_NAME"
 echo "实例类型:     $FLEET_INSTANCE_TYPE"
 echo "Fleet 类型:   $FLEET_TYPE"
 echo "容量:         Min=$MIN_CAPACITY, Max=$MAX_CAPACITY"
+echo "会话最长:     ${MAX_SESSION_SECONDS}s ($((MAX_SESSION_SECONDS/3600))h$((MAX_SESSION_SECONDS%3600/60))m)"
+echo "断开超时:     ${DISCONNECT_SECONDS}s ($((DISCONNECT_SECONDS/60))min)"
+echo "空闲超时:     ${IDLE_SECONDS}s ($((IDLE_SECONDS/60))min)"
 echo "Subnet:       $PRIVATE_SUBNET"
 echo "SG:           $FLEET_SG"
 
@@ -127,9 +136,9 @@ if [[ -z "$FLEET_EXISTS" || "$FLEET_EXISTS" == "None" ]]; then
     --display-name "${CFN_STACK_NAME} ${FLEET_SUFFIX} Fleet (${FLEET_INSTANCE_TYPE})" \
     --description "WorkSpaces Applications Fleet - ${CFN_STACK_NAME}/${FLEET_SUFFIX}" \
     --stream-view DESKTOP \
-    --max-user-duration-in-seconds 9000 \
-    --disconnect-timeout-in-seconds 9000 \
-    --idle-disconnect-timeout-in-seconds 9000 \
+    --max-user-duration-in-seconds "$MAX_SESSION_SECONDS" \
+    --disconnect-timeout-in-seconds "$DISCONNECT_SECONDS" \
+    --idle-disconnect-timeout-in-seconds "$IDLE_SECONDS" \
     --output json > /dev/null
   echo "Fleet 创建成功 ✅"
 else
@@ -235,7 +244,7 @@ echo "Stack:        $STACK_NAME"
 echo "实例类型:     $FLEET_INSTANCE_TYPE"
 echo "Fleet 类型:   $FLEET_TYPE"
 echo "Auto Scaling: Min=$MIN_CAPACITY, Max=$MAX_CAPACITY"
-echo "会话最大时长: 2.5 小时"
+echo "会话最大时长: ${MAX_SESSION_SECONDS}s ($((MAX_SESSION_SECONDS/3600))h$((MAX_SESSION_SECONDS%3600/60))m)"
 echo ""
 echo "下一步 - 预热实例（培训前执行）："
 echo "  bash scale-fleet.sh warmup <count> （ENV_NAME=${CFN_STACK_NAME}-${FLEET_SUFFIX}）"
