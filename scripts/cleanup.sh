@@ -188,8 +188,35 @@ if [[ "$DEL_CFN" == "y" || "$DEL_CFN" == "Y" ]]; then
     --output text 2>/dev/null || true)
   if [[ -n "$BUCKET" && "$BUCKET" != "None" ]]; then
     echo "  清空 s3://$BUCKET ..."
+    # 先删除当前对象
     aws s3 rm "s3://$BUCKET" --recursive --region "$REGION" > /dev/null 2>&1 || true
-    echo "  ✅ Bucket 已清空"
+    # 删除所有版本（处理开启了 Versioning 的情况）
+    echo "  清理历史版本和删除标记..."
+    while true; do
+      VERSIONS=$(aws s3api list-object-versions \
+        --bucket "$BUCKET" --region "$REGION" \
+        --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' \
+        --output json 2>/dev/null || echo '{"Objects":null}')
+      DELETE_MARKERS=$(aws s3api list-object-versions \
+        --bucket "$BUCKET" --region "$REGION" \
+        --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' \
+        --output json 2>/dev/null || echo '{"Objects":null}')
+      HAS_VERSIONS=false
+      # 删除版本
+      if echo "$VERSIONS" | grep -q '"Key"'; then
+        aws s3api delete-objects --bucket "$BUCKET" --region "$REGION" \
+          --delete "$VERSIONS" > /dev/null 2>&1 || true
+        HAS_VERSIONS=true
+      fi
+      # 删除标记
+      if echo "$DELETE_MARKERS" | grep -q '"Key"'; then
+        aws s3api delete-objects --bucket "$BUCKET" --region "$REGION" \
+          --delete "$DELETE_MARKERS" > /dev/null 2>&1 || true
+        HAS_VERSIONS=true
+      fi
+      $HAS_VERSIONS || break
+    done
+    echo "  ✅ Bucket 已完全清空（含历史版本）"
   fi
 
   # 删除 CFN Stack
