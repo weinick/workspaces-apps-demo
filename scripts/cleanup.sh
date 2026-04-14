@@ -22,7 +22,14 @@
 
 set -euo pipefail
 
-REGION="${1:-${REGION:-ap-southeast-1}}"
+REGION="${1:-${REGION:-}}"
+
+if [[ -z "$REGION" ]]; then
+  echo "❌ 必须指定 Region"
+  echo "  REGION=<region> ENV_NAME=<name> $0"
+  echo "  $0 <region> <cfn-stack-name> <fleet-suffix>"
+  exit 1
+fi
 
 # 支持两种参数模式：
 # 1) 位置参数: cleanup.sh <region> <cfn-stack-name> <fleet-suffix> [image]

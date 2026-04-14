@@ -24,8 +24,19 @@
 set -euo pipefail
 
 ACTION="${1:-}"
-REGION="${REGION:-ap-southeast-1}"
-ENV_NAME="${ENV_NAME:-siemens-demo}"
+REGION="${REGION:-}"
+ENV_NAME="${ENV_NAME:-}"
+
+if [[ -z "$REGION" || -z "$ENV_NAME" ]]; then
+  echo "❌ 必须指定 REGION 和 ENV_NAME 环境变量"
+  echo "  REGION=<region> ENV_NAME=<env-name> $0 <action> [count]"
+  echo ""
+  echo "示例:"
+  echo "  REGION=eu-central-1 ENV_NAME=my-demo-gpu $0 warmup 20"
+  echo "  REGION=eu-central-1 ENV_NAME=my-demo-gpu $0 down"
+  exit 1
+fi
+
 FLEET_NAME="${ENV_NAME}-fleet"
 
 # ============================================================
