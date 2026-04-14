@@ -319,7 +319,7 @@ if [[ "$ACTION" == "warmup" ]]; then
   print_status
   echo ""
   echo "下一步 — 生成学员 Streaming URL："
-  echo "  bash scripts/generate-urls.sh $REGION $ENV_NAME $COUNT <有效期小时>"
+  echo "  bash scripts/generate-urls.sh $COUNT <有效期小时>"
   exit 0
 fi
 

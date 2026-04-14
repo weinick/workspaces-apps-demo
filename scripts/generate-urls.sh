@@ -5,22 +5,43 @@
 
 set -euo pipefail
 
-REGION="${1:-ap-southeast-1}"
-ENV_NAME="${2:-my-demo}"
-STUDENT_COUNT="${3:-}"   # 必须提供
-URL_HOURS="${4:-2.5}"    # URL 有效期（小时，支持小数）
+# 支持两种调用方式：
+# 1) 位置参数: generate-urls.sh <region> <env-name> <count> [hours]
+# 2) .env 自动加载: generate-urls.sh <count> [hours]
 
-if [[ -z "$STUDENT_COUNT" ]]; then
-  echo "Usage: $0 <region> <env-name> <student-count> [url-validity-hours]"
-  echo "Example: $0 ap-southeast-1 my-demo-gpu 20 3"
+# 判断第一个参数是 region 还是数字（学员数）
+if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+  # 新模式：从 .env 加载 REGION/ENV_NAME，第一个参数是学员数
+  # 自动加载 .env 文件
+  if [[ -n "${ENV_NAME:-}" && -f ".env.${ENV_NAME}" ]]; then
+    source ".env.${ENV_NAME}"
+  elif [[ -z "${ENV_NAME:-}" ]]; then
+    ENV_FILES=(.env.*)
+    if [[ ${#ENV_FILES[@]} -eq 1 && -f "${ENV_FILES[0]}" ]]; then
+      source "${ENV_FILES[0]}"
+    fi
+  fi
+  STUDENT_COUNT="$1"
+  URL_HOURS="${2:-2.5}"
+else
+  # 原有模式：位置参数
+  REGION="${1:-${REGION:-}}"
+  ENV_NAME="${2:-${ENV_NAME:-}}"
+  STUDENT_COUNT="${3:-}"
+  URL_HOURS="${4:-2.5}"
+fi
+
+REGION="${REGION:-}"
+ENV_NAME="${ENV_NAME:-}"
+
+if [[ -z "$REGION" || -z "$ENV_NAME" || -z "$STUDENT_COUNT" ]]; then
+  echo "Usage:"
+  echo "  $0 <student-count> [url-validity-hours]          ← 自动加载 .env 文件"
+  echo "  $0 <region> <env-name> <student-count> [hours]   ← 手动指定"
   echo ""
-  echo "Parameters:"
-  echo "  student-count       学员人数，生成对应数量的独立 URL"
-  echo "  url-validity-hours  URL 有效期（小时，支持小数如 2.5）  (default: 2.5)"
-  echo ""
-  echo "输出文件:"
-  echo "  <env-name>-urls-<timestamp>.csv  CSV 格式（含编号/UserID/URL，可直接用 Excel 打开）"
-  echo "  <env-name>-urls-<timestamp>.txt  纯文本格式（备用）"
+  echo "Examples:"
+  echo "  $0 20 8             # .env 自动加载，生成 20 个 URL，8小时有效"
+  echo "  $0 ap-northeast-1 my-demo-gpu 20 3"
   exit 1
 fi
 
