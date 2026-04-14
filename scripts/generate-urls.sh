@@ -49,7 +49,7 @@ if [[ "$FLEET_STATE" == "NOT_FOUND" || "$FLEET_STATE" == "None" ]]; then
 fi
 
 if [[ "$FLEET_STATE" != "RUNNING" ]]; then
-  echo "❌ Fleet 状态为 $FLEET_STATE（需要 RUNNING），请检查 Fleet 是否正常"
+  echo "❌ Fleet 状态为 ${FLEET_STATE}（需要 RUNNING），请检查 Fleet 是否正常"
   exit 1
 fi
 

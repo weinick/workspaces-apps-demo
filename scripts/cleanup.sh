@@ -62,7 +62,7 @@ elif [[ "$FLEET_STATE" == "RUNNING" ]]; then
   aws appstream wait fleet-stopped --names "$FLEET_NAME" --region "$REGION"
   echo "Fleet 已停止 ✅"
 else
-  echo "Fleet 状态: $FLEET_STATE，跳过停止步骤"
+  echo "Fleet 状态: ${FLEET_STATE}，跳过停止步骤"
 fi
 
 # ---- 2. 解除 Fleet 与 Stack 的关联 ----
