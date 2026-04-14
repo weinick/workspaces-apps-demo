@@ -196,9 +196,27 @@ if [[ "$DEL_CFN" == "y" || "$DEL_CFN" == "Y" ]]; then
   echo ""
   echo "=== 删除 CloudFormation Stack ==="
   aws cloudformation delete-stack --stack-name "$CFN_STACK_NAME" --region "$REGION"
-  echo "  等待 Stack 删除完成（约 5-10 分钟）..."
-  aws cloudformation wait stack-delete-complete --stack-name "$CFN_STACK_NAME" --region "$REGION" 2>/dev/null
-  echo "  ✅ CloudFormation Stack '$CFN_STACK_NAME' 已删除"
+  echo "  等待 Stack 删除完成..."
+  START_TIME=$SECONDS
+  while true; do
+    STATUS=$(aws cloudformation describe-stacks \
+      --stack-name "$CFN_STACK_NAME" --region "$REGION" \
+      --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DELETE_COMPLETE")
+    ELAPSED=$(( SECONDS - START_TIME ))
+    ELAPSED_MIN=$(( ELAPSED / 60 ))
+    ELAPSED_SEC=$(( ELAPSED % 60 ))
+    if [[ "$STATUS" == "DELETE_COMPLETE" ]]; then
+      echo "  ✅ CloudFormation Stack '$CFN_STACK_NAME' 已删除 (${ELAPSED_MIN}m${ELAPSED_SEC}s)"
+      break
+    elif [[ "$STATUS" == *FAILED* || "$STATUS" == *ROLLBACK* ]]; then
+      echo "  ❌ Stack 删除失败，当前状态: $STATUS"
+      echo "  请在 CloudFormation 控制台查看失败原因"
+      break
+    else
+      echo "  [${ELAPSED_MIN}m${ELAPSED_SEC}s] 状态: $STATUS"
+    fi
+    sleep 30
+  done
   echo ""
   echo "=============================="
   echo "✅ 所有资源已清理完毕"
