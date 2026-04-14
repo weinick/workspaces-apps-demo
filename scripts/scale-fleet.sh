@@ -166,6 +166,12 @@ if [[ "$ACTION" == "down" ]]; then
   echo "✅ 归零完成，stopped instance 费用已停止"
   echo ""
   print_status
+  echo ""
+  echo "下一步 — 如需彻底删除 Fleet/Stack/镜像等资源："
+  echo "  bash scripts/cleanup.sh <region> <cfn-stack-name> <fleet-suffix> [custom-image-name]"
+  echo ""
+  echo "示例："
+  echo "  bash scripts/cleanup.sh $REGION my-demo gpu my-gpu-image-v1"
   exit 0
 fi
 
