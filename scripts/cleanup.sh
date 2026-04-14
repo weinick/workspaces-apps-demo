@@ -115,21 +115,6 @@ echo "=============================="
 echo ""
 read -r -p "是否同时删除 CloudFormation Stack（VPC、S3、IAM 等全部基础设施）？(y/N) " DEL_CFN
 if [[ "$DEL_CFN" == "y" || "$DEL_CFN" == "Y" ]]; then
-  # 先删除所有 Image Builder
-  echo ""
-  echo "=== 清理 Image Builder ==="
-  BUILDERS=$(aws appstream describe-image-builders --region "$REGION" \
-    --query "ImageBuilders[?contains(Name, '${CFN_STACK_NAME}')].Name" \
-    --output text 2>/dev/null || true)
-  if [[ -n "$BUILDERS" && "$BUILDERS" != "None" ]]; then
-    for BUILDER in $BUILDERS; do
-      echo "  删除 Image Builder: $BUILDER"
-      bash scripts/delete-imagebuilder.sh "$REGION" "$CFN_STACK_NAME" 2>/dev/null <<< "y" || true
-    done
-  else
-    echo "  无 Image Builder，跳过"
-  fi
-
   # 清空 S3 Bucket（CFN 删除前必须清空）
   echo ""
   echo "=== 清空 S3 Bucket ==="
@@ -157,6 +142,5 @@ if [[ "$DEL_CFN" == "y" || "$DEL_CFN" == "Y" ]]; then
 else
   echo ""
   echo "如需后续删除全部基础设施："
-  echo "  bash scripts/delete-imagebuilder.sh $REGION $CFN_STACK_NAME"
   echo "  aws cloudformation delete-stack --stack-name $CFN_STACK_NAME --region $REGION"
 fi
