@@ -3,8 +3,12 @@
 # 一键清理 WorkSpaces Applications Demo 所有 AWS 资源
 # 顺序: Fleet → Stack → 自定义镜像 → Image Builder → CloudFormation Stack
 #
-# 用法:
-#   bash cleanup.sh <region> <env-name> <fleet-suffix> [custom-image-name]
+# 用法 1（位置参数）:
+#   bash cleanup.sh <region> <cfn-stack-name> <fleet-suffix> [custom-image-name]
+#
+# 用法 2（环境变量，与 scale-fleet.sh 保持一致）:
+#   ENV_NAME=my-demo-gpu bash cleanup.sh
+#   REGION=us-east-1 ENV_NAME=my-demo-gpu bash cleanup.sh
 #
 # 示例（单 Fleet）:
 #   bash cleanup.sh ap-southeast-1 my-demo gpu my-gpu-image-v1
@@ -18,19 +22,37 @@
 
 set -euo pipefail
 
-REGION="${1:-ap-southeast-1}"
-CFN_STACK_NAME="${2:-my-demo}"
-FLEET_SUFFIX="${3:-}"
-CUSTOM_IMAGE_NAME="${4:-}"
+REGION="${1:-${REGION:-ap-southeast-1}}"
 
-if [[ -z "$FLEET_SUFFIX" ]]; then
-  echo "Usage: $0 <region> <cfn-stack-name> <fleet-suffix> [custom-image-name]"
-  echo "Example: $0 ap-southeast-1 my-demo gpu my-gpu-image-v1"
+# 支持两种参数模式：
+# 1) 位置参数: cleanup.sh <region> <cfn-stack-name> <fleet-suffix> [image]
+# 2) 环境变量: ENV_NAME=<cfn-stack-name>-<fleet-suffix> cleanup.sh
+if [[ -n "${2:-}" && -n "${3:-}" ]]; then
+  # 位置参数模式
+  CFN_STACK_NAME="$2"
+  FLEET_SUFFIX="$3"
+  CUSTOM_IMAGE_NAME="${4:-}"
+elif [[ -n "${ENV_NAME:-}" ]]; then
+  # 环境变量模式：从 Fleet 描述中自动获取镜像名
+  FLEET_NAME="${ENV_NAME}-fleet"
+  CUSTOM_IMAGE_NAME=$(aws appstream describe-fleets \
+    --names "$FLEET_NAME" --region "$REGION" \
+    --query 'Fleets[0].ImageName' --output text 2>/dev/null || echo "")
+  [[ "$CUSTOM_IMAGE_NAME" == "None" ]] && CUSTOM_IMAGE_NAME=""
+else
+  echo "Usage:"
+  echo "  $0 <region> <cfn-stack-name> <fleet-suffix> [custom-image-name]"
+  echo "  ENV_NAME=<name> $0"
+  echo ""
+  echo "Examples:"
+  echo "  $0 ap-southeast-1 my-demo gpu my-gpu-image-v1"
+  echo "  ENV_NAME=my-demo-gpu $0"
   exit 1
 fi
 
-FLEET_NAME="${CFN_STACK_NAME}-${FLEET_SUFFIX}-fleet"
-STACK_NAME="${CFN_STACK_NAME}-${FLEET_SUFFIX}-stack"
+# 如果通过位置参数模式，拼接 Fleet/Stack 名称
+FLEET_NAME="${FLEET_NAME:-${CFN_STACK_NAME}-${FLEET_SUFFIX}-fleet}"
+STACK_NAME="${ENV_NAME:-${CFN_STACK_NAME}-${FLEET_SUFFIX}}-stack"
 
 echo "=============================="
 echo "WorkSpaces Applications Cleanup"
@@ -115,6 +137,14 @@ echo "=============================="
 echo ""
 read -r -p "是否同时删除 CloudFormation Stack（VPC、S3、IAM 等全部基础设施）？(y/N) " DEL_CFN
 if [[ "$DEL_CFN" == "y" || "$DEL_CFN" == "Y" ]]; then
+  # 环境变量模式下可能没有 CFN_STACK_NAME，需要询问
+  if [[ -z "${CFN_STACK_NAME:-}" ]]; then
+    read -r -p "请输入 CloudFormation Stack 名称: " CFN_STACK_NAME
+    if [[ -z "$CFN_STACK_NAME" ]]; then
+      echo "未提供 Stack 名称，跳过 CFN 删除"
+      exit 0
+    fi
+  fi
   # 清空 S3 Bucket（CFN 删除前必须清空）
   echo ""
   echo "=== 清空 S3 Bucket ==="
@@ -141,6 +171,11 @@ if [[ "$DEL_CFN" == "y" || "$DEL_CFN" == "Y" ]]; then
   echo "=============================="
 else
   echo ""
-  echo "如需后续删除全部基础设施："
-  echo "  aws cloudformation delete-stack --stack-name $CFN_STACK_NAME --region $REGION"
+  if [[ -n "${CFN_STACK_NAME:-}" ]]; then
+    echo "如需后续删除全部基础设施："
+    echo "  aws cloudformation delete-stack --stack-name $CFN_STACK_NAME --region $REGION"
+  else
+    echo "如需后续删除全部基础设施："
+    echo "  aws cloudformation delete-stack --stack-name <cfn-stack-name> --region $REGION"
+  fi
 fi

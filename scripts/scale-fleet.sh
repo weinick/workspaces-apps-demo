@@ -166,12 +166,19 @@ if [[ "$ACTION" == "down" ]]; then
   echo "✅ 归零完成，stopped instance 费用已停止"
   echo ""
   print_status
+  # 获取 Fleet 使用的镜像名称
+  IMAGE_NAME=$(aws appstream describe-fleets \
+    --names "$FLEET_NAME" --region "$REGION" \
+    --query 'Fleets[0].ImageName' --output text 2>/dev/null || echo "")
+  [[ "$IMAGE_NAME" == "None" ]] && IMAGE_NAME=""
+
   echo ""
   echo "下一步 — 如需彻底删除 Fleet/Stack/镜像等资源："
-  echo "  bash scripts/cleanup.sh <region> <cfn-stack-name> <fleet-suffix> [custom-image-name]"
-  echo ""
-  echo "示例："
-  echo "  bash scripts/cleanup.sh $REGION my-demo gpu my-gpu-image-v1"
+  echo "  REGION=$REGION ENV_NAME=$ENV_NAME bash scripts/cleanup.sh"
+  if [[ -n "$IMAGE_NAME" ]]; then
+    echo ""
+    echo "当前 Fleet 使用的镜像: $IMAGE_NAME"
+  fi
   exit 0
 fi
 
